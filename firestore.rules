@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Règles pour la collection transactions
+    match /transactions/{transactionId} {
+      // Pour le développement : permettre la lecture et l'écriture à tous
+      // ⚠️ À RESTREINDRE EN PRODUCTION avec authentification
+      allow read, write: if true;
+      
+      // Pour la production avec authentification, utilisez :
+      // allow read, write: if request.auth != null;
+    }
+    
+    // Règles pour d'autres collections futures
+    match /{document=**} {
+      // Par défaut, refuser l'accès
+      allow read, write: if false;
+    }
+  }
+}
+
