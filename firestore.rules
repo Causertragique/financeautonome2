@@ -1,21 +1,68 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Règles pour la collection transactions
-    match /transactions/{transactionId} {
-      // Pour le développement : permettre la lecture et l'écriture à tous
-      // ⚠️ À RESTREINDRE EN PRODUCTION avec authentification
-      allow read, write: if true;
-      
-      // Pour la production avec authentification, utilisez :
-      // allow read, write: if request.auth != null;
+    // Fonction helper pour vérifier que l'utilisateur est authentifié
+    function isAuthenticated() {
+      return request.auth != null;
     }
     
-    // Règles pour d'autres collections futures
-    match /{document=**} {
-      // Par défaut, refuser l'accès
-      allow read, write: if false;
+    // Fonction helper pour vérifier que l'utilisateur est le propriétaire du document
+    // (l'utilisateur connecté correspond au userId du document)
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
+    
+    // Règles pour la collection users (profils utilisateurs)
+    // Chaque utilisateur peut uniquement accéder à son propre profil
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update, delete: if isOwner(userId);
+    }
+    
+    // Règles pour la collection transactions
+    // Chaque utilisateur peut uniquement accéder à ses propres transactions
+    match /transactions/{transactionId} {
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isOwner(request.resource.data.userId);
+      allow update, delete: if isOwner(resource.data.userId);
+    }
+    
+    // Règles pour la collection companies
+    // Chaque utilisateur peut uniquement accéder à ses propres companies
+    match /companies/{companyId} {
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isOwner(request.resource.data.userId);
+      allow update, delete: if isOwner(resource.data.userId);
+    }
+    
+    // Règles pour la collection paymentMethods
+    // Chaque utilisateur peut uniquement accéder à ses propres modes de paiement
+    match /paymentMethods/{paymentMethodId} {
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isOwner(request.resource.data.userId);
+      allow update, delete: if isOwner(resource.data.userId);
+    }
+    
+            // Règles pour la collection assets
+            // Chaque utilisateur peut uniquement accéder à ses propres actifs
+            match /assets/{assetId} {
+              allow read: if isOwner(resource.data.userId);
+              allow create: if isOwner(request.resource.data.userId);
+              allow update, delete: if isOwner(resource.data.userId);
+            }
+            
+            // Règles pour la collection vehicleExpenses
+            // Chaque utilisateur peut uniquement accéder à ses propres dépenses véhicule
+            match /vehicleExpenses/{vehicleExpenseId} {
+              allow read: if isOwner(resource.data.userId);
+              allow create: if isOwner(request.resource.data.userId);
+              allow update, delete: if isOwner(resource.data.userId);
+            }
+            
+            // Règles par défaut : refuser l'accès aux autres collections
+            match /{document=**} {
+              allow read, write: if false;
+            }
   }
 }
-

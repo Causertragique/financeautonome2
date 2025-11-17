@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
 import { useLanguage } from "../contexts/LanguageContext";
-import { useFiscalYear, getFiscalYearStartMonth } from "../hooks/use-fiscal-year";
+import { useAuth } from "../contexts/AuthContext";
+import { useFiscalYearContext } from "../contexts/FiscalYearContext";
 import { Calendar, TrendingUp, TrendingDown, DollarSign, Building2, FileText } from "lucide-react";
 import { getTransactions, type Transaction } from "../lib/db";
 
 export default function Accounting() {
   const { t } = useLanguage();
-  const fiscalYearStartMonth = getFiscalYearStartMonth();
-  const fiscalYear = useFiscalYear(fiscalYearStartMonth);
-  const [selectedYear, setSelectedYear] = useState(fiscalYear);
+  const { currentUser } = useAuth();
+  const { selectedYear } = useFiscalYearContext();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  
-  const availableYears = Array.from({ length: 6 }, (_, i) => fiscalYear - i);
 
   // Charger les transactions depuis la base de données
   useEffect(() => {
@@ -39,40 +37,49 @@ export default function Accounting() {
     };
   }, [selectedYear]);
 
-  // Données mock pour les années autres que 2020-2024
-  const shouldShowMockData = selectedYear < 2020 || selectedYear > 2024;
+  // Les données mock sont uniquement pour la démo quand l'utilisateur n'est pas connecté
+  // Si l'utilisateur est connecté, on utilise les vraies données depuis Firestore
+  const shouldShowMockData = !currentUser;
 
   // Calculer les comptes à recevoir à partir des transactions de revenus
-  const accountsReceivable = shouldShowMockData 
-    ? transactions.filter(t => t.type === "income").reduce((sum, t) => sum + (t.amount || 0), 0)
-    : 0;
+  const accountsReceivable = transactions
+    .filter(t => t.type === "income")
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
 
   // Calculer les dettes fournisseurs à partir des transactions de dépenses
-  const accountsPayable = shouldShowMockData
-    ? transactions.filter(t => t.type === "expense").reduce((sum, t) => sum + (t.amount || 0), 0)
-    : 0;
+  const accountsPayable = transactions
+    .filter(t => t.type === "expense")
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
 
-  const assets = shouldShowMockData ? {
+  const assets = {
     current: [
-      { name: "Comptes bancaires", amount: 25000 },
-      { name: "Comptes clients (à recevoir)", amount: accountsReceivable, fromTransactions: true },
-      { name: "Inventaire", amount: 3200 },
+      ...(shouldShowMockData ? [
+        { name: "Comptes bancaires", amount: 25000 },
+        { name: "Inventaire", amount: 3200 },
+      ] : []),
+      ...(accountsReceivable > 0 ? [
+        { name: "Comptes clients (à recevoir)", amount: accountsReceivable, fromTransactions: true },
+      ] : []),
     ],
-    nonCurrent: [
+    nonCurrent: shouldShowMockData ? [
       { name: "Équipement", amount: 15000 },
       { name: "Amortissement cumulé", amount: -2500 },
-    ],
-  } : { current: [], nonCurrent: [] };
+    ] : [],
+  };
 
-  const liabilities = shouldShowMockData ? {
+  const liabilities = {
     current: [
-      { name: "Dettes fournisseurs", amount: accountsPayable, fromTransactions: true },
-      { name: "Prêts à court terme", amount: 5000 },
+      ...(accountsPayable > 0 ? [
+        { name: "Dettes fournisseurs", amount: accountsPayable, fromTransactions: true },
+      ] : []),
+      ...(shouldShowMockData ? [
+        { name: "Prêts à court terme", amount: 5000 },
+      ] : []),
     ],
-    nonCurrent: [
+    nonCurrent: shouldShowMockData ? [
       { name: "Prêts à long terme", amount: 10000 },
-    ],
-  } : { current: [], nonCurrent: [] };
+    ] : [],
+  };
 
   const equity = shouldShowMockData ? [
     { name: "Capital", amount: 25000 },
@@ -98,78 +105,64 @@ export default function Accounting() {
   return (
     <MainLayout>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">Comptabilité</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-bold text-foreground mb-1">Comptabilité</h1>
+          <p className="text-sm text-muted-foreground">
             Vue d'ensemble de vos actifs, passifs, capitaux propres et investissements
           </p>
-        </div>
-        <div className="flex items-center gap-3 bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl px-4 py-2.5">
-          <Calendar className="w-5 h-5 text-muted-foreground" />
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
-            className="bg-transparent border-none text-foreground font-medium focus:outline-none cursor-pointer"
-          >
-            {availableYears.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-3xl border-2 border-blue-200/50 p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="bg-blue-400/30 p-4 rounded-2xl">
-              <TrendingUp className="w-6 h-6 text-blue-600" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-xl border border-blue-200/50 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="bg-blue-400/30 p-3 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-blue-600" />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-2 font-semibold uppercase">Total Actifs</p>
-          <h3 className="text-3xl font-extrabold text-foreground">
-            ${shouldShowMockData ? totalAssets.toLocaleString() : "0"}
+          <p className="text-xs text-muted-foreground mb-1 font-semibold uppercase">Total Actifs</p>
+          <h3 className="text-2xl font-bold text-foreground">
+            {totalAssets.toLocaleString()} $
           </h3>
         </div>
 
-        <div className="bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-3xl border-2 border-red-200/50 p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="bg-red-400/30 p-4 rounded-2xl">
-              <TrendingDown className="w-6 h-6 text-red-600" />
+        <div className="bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-xl border border-red-200/50 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="bg-red-400/30 p-3 rounded-lg">
+              <TrendingDown className="w-5 h-5 text-red-600" />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-2 font-semibold uppercase">Total Passifs</p>
-          <h3 className="text-3xl font-extrabold text-foreground">
-            ${shouldShowMockData ? totalLiabilities.toLocaleString() : "0"}
+          <p className="text-xs text-muted-foreground mb-1 font-semibold uppercase">Total Passifs</p>
+          <h3 className="text-2xl font-bold text-foreground">
+            {totalLiabilities.toLocaleString()} $
           </h3>
         </div>
 
-        <div className="bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-3xl border-2 border-green-200/50 p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="bg-green-400/30 p-4 rounded-2xl">
-              <DollarSign className="w-6 h-6 text-green-600" />
+        <div className="bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-xl border border-green-200/50 p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="bg-green-400/30 p-3 rounded-lg">
+              <DollarSign className="w-5 h-5 text-green-600" />
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mb-2 font-semibold uppercase">Capitaux Propres</p>
-          <h3 className="text-3xl font-extrabold text-foreground">
-            ${shouldShowMockData ? totalEquity.toLocaleString() : "0"}
+          <p className="text-xs text-muted-foreground mb-1 font-semibold uppercase">Capitaux Propres</p>
+          <h3 className="text-2xl font-bold text-foreground">
+            {totalEquity.toLocaleString()} $
           </h3>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         {/* Actifs */}
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-blue-600" />
+        <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+          <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-blue-600" />
             Actifs
           </h2>
           
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase">Actifs courants</h3>
+          <div className="mb-4">
+            <h3 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">Actifs courants</h3>
             {shouldShowMockData && assets.current.length > 0 ? (
               <div className="space-y-2">
                 {assets.current.map((asset, idx) => (
@@ -182,13 +175,13 @@ export default function Accounting() {
                         </span>
                       )}
                     </div>
-                    <span className="font-semibold text-blue-600">${asset.amount.toLocaleString()}</span>
+                    <span className="font-semibold text-blue-600">{asset.amount.toLocaleString()} $</span>
                   </div>
                 ))}
                 <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                   <span>Total Actifs courants</span>
                   <span className="text-blue-600">
-                    ${assets.current.reduce((sum, a) => sum + a.amount, 0).toLocaleString()}
+                    {assets.current.reduce((sum, a) => sum + a.amount, 0).toLocaleString()} $
                   </span>
                 </div>
               </div>
@@ -198,21 +191,21 @@ export default function Accounting() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase">Actifs non courants</h3>
+            <h3 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">Actifs non courants</h3>
             {shouldShowMockData && assets.nonCurrent.length > 0 ? (
               <div className="space-y-2">
                 {assets.nonCurrent.map((asset, idx) => (
                   <div key={idx} className="flex justify-between items-center py-2 border-b border-border/30">
                     <span className="text-foreground">{asset.name}</span>
                     <span className={`font-semibold ${asset.amount < 0 ? 'text-red-600' : 'text-blue-600'}`}>
-                      ${asset.amount.toLocaleString()}
+                      {asset.amount.toLocaleString()} $
                     </span>
                   </div>
                 ))}
                 <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                   <span>Total Actifs non courants</span>
                   <span className="text-blue-600">
-                    ${assets.nonCurrent.reduce((sum, a) => sum + a.amount, 0).toLocaleString()}
+                    {assets.nonCurrent.reduce((sum, a) => sum + a.amount, 0).toLocaleString()} $
                   </span>
                 </div>
               </div>
@@ -223,14 +216,14 @@ export default function Accounting() {
         </div>
 
         {/* Passifs */}
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-            <TrendingDown className="w-5 h-5 text-red-600" />
+        <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+          <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+            <TrendingDown className="w-4 h-4 text-red-600" />
             Passifs
           </h2>
           
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase">Passifs courants</h3>
+          <div className="mb-4">
+            <h3 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">Passifs courants</h3>
             {shouldShowMockData && liabilities.current.length > 0 ? (
               <div className="space-y-2">
                 {liabilities.current.map((liability, idx) => (
@@ -243,13 +236,13 @@ export default function Accounting() {
                         </span>
                       )}
                     </div>
-                    <span className="font-semibold text-red-600">${liability.amount.toLocaleString()}</span>
+                    <span className="font-semibold text-red-600">{liability.amount.toLocaleString()} $</span>
                   </div>
                 ))}
                 <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                   <span>Total Passifs courants</span>
                   <span className="text-red-600">
-                    ${liabilities.current.reduce((sum, l) => sum + l.amount, 0).toLocaleString()}
+                    {liabilities.current.reduce((sum, l) => sum + l.amount, 0).toLocaleString()} $
                   </span>
                 </div>
               </div>
@@ -259,19 +252,19 @@ export default function Accounting() {
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase">Passifs non courants</h3>
+            <h3 className="text-xs font-semibold text-muted-foreground mb-2 uppercase">Passifs non courants</h3>
             {shouldShowMockData && liabilities.nonCurrent.length > 0 ? (
               <div className="space-y-2">
                 {liabilities.nonCurrent.map((liability, idx) => (
                   <div key={idx} className="flex justify-between items-center py-2 border-b border-border/30">
                     <span className="text-foreground">{liability.name}</span>
-                    <span className="font-semibold text-red-600">${liability.amount.toLocaleString()}</span>
+                    <span className="font-semibold text-red-600">{liability.amount.toLocaleString()} $</span>
                   </div>
                 ))}
                 <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                   <span>Total Passifs non courants</span>
                   <span className="text-red-600">
-                    ${liabilities.nonCurrent.reduce((sum, l) => sum + l.amount, 0).toLocaleString()}
+                    {liabilities.nonCurrent.reduce((sum, l) => sum + l.amount, 0).toLocaleString()} $
                   </span>
                 </div>
               </div>
@@ -282,11 +275,11 @@ export default function Accounting() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Capitaux Propres */}
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-            <DollarSign className="w-5 h-5 text-green-600" />
+        <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+          <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-green-600" />
             Capitaux Propres
           </h2>
           {shouldShowMockData && equity.length > 0 ? (
@@ -294,13 +287,13 @@ export default function Accounting() {
               {equity.map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center py-2 border-b border-border/30">
                   <span className="text-foreground">{item.name}</span>
-                  <span className="font-semibold text-green-600">${item.amount.toLocaleString()}</span>
+                  <span className="font-semibold text-green-600">{item.amount.toLocaleString()} $</span>
                 </div>
               ))}
               <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                 <span>Total Capitaux propres</span>
                 <span className="text-green-600">
-                  ${totalEquity.toLocaleString()}
+                  {totalEquity.toLocaleString()} $
                 </span>
               </div>
             </div>
@@ -310,9 +303,9 @@ export default function Accounting() {
         </div>
 
         {/* Investissements */}
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-purple-600" />
+        <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+          <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-sky-600" />
             Investissements
           </h2>
           {shouldShowMockData && investments.length > 0 ? (
@@ -321,15 +314,15 @@ export default function Accounting() {
                 <div key={idx} className="border-b border-border/30 pb-3">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-foreground font-medium">{investment.name}</span>
-                    <span className="font-semibold text-purple-600">${investment.amount.toLocaleString()}</span>
+                    <span className="font-semibold text-sky-600">{investment.amount.toLocaleString()} $</span>
                   </div>
                   <span className="text-xs text-muted-foreground">{investment.date}</span>
                 </div>
               ))}
               <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                 <span>Total Investissements</span>
-                <span className="text-purple-600">
-                  ${investments.reduce((sum, i) => sum + i.amount, 0).toLocaleString()}
+                <span className="text-sky-600">
+                  {investments.reduce((sum, i) => sum + i.amount, 0).toLocaleString()} $
                 </span>
               </div>
             </div>
@@ -339,9 +332,9 @@ export default function Accounting() {
         </div>
 
         {/* Prêts */}
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-orange-600" />
+        <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+          <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-orange-600" />
             Prêts
           </h2>
           {shouldShowMockData && loans.length > 0 ? (
@@ -350,7 +343,7 @@ export default function Accounting() {
                 <div key={idx} className="border-b border-border/30 pb-3">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-foreground font-medium">{loan.name}</span>
-                    <span className="font-semibold text-orange-600">${loan.amount.toLocaleString()}</span>
+                    <span className="font-semibold text-orange-600">{loan.amount.toLocaleString()} $</span>
                   </div>
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>{loan.type}</span>
@@ -362,7 +355,7 @@ export default function Accounting() {
               <div className="flex justify-between items-center py-2 font-bold text-foreground mt-2">
                 <span>Total Prêts</span>
                 <span className="text-orange-600">
-                  ${loans.reduce((sum, l) => sum + l.amount, 0).toLocaleString()}
+                  {loans.reduce((sum, l) => sum + l.amount, 0).toLocaleString()} $
                 </span>
               </div>
             </div>

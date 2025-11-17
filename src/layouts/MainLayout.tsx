@@ -1,6 +1,8 @@
 import React, { ReactNode, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
+import { useFiscalYearContext } from "../contexts/FiscalYearContext";
 import {
   BarChart3,
   Building2,
@@ -16,7 +18,17 @@ import {
   User,
   ChevronDown,
   Calculator,
+  LogOut,
+  AlertTriangle,
+  Package,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -24,8 +36,29 @@ interface MainLayoutProps {
 
 export default function MainLayout({ children }: MainLayoutProps) {
   const { t } = useLanguage();
+  const { currentUser, logout } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
+  const { selectedYear, setSelectedYear, availableYears } = useFiscalYearContext();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast({
+        title: "Déconnexion réussie",
+        description: "Vous avez été déconnecté avec succès.",
+      });
+      navigate("/login");
+    } catch (error: any) {
+      toast({
+        title: "Erreur",
+        description: error.message || "Une erreur est survenue lors de la déconnexion.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const navigationItems = [
     {
@@ -59,6 +92,16 @@ export default function MainLayout({ children }: MainLayoutProps) {
       icon: FileText,
     },
     {
+      name: t("sidebar.anomalies"),
+      href: "/anomalies",
+      icon: AlertTriangle,
+    },
+    {
+      name: t("sidebar.assets"),
+      href: "/assets",
+      icon: Package,
+    },
+    {
       name: t("sidebar.settings"),
       href: "/settings",
       icon: Settings,
@@ -82,20 +125,15 @@ export default function MainLayout({ children }: MainLayoutProps) {
       >
         {/* Logo/Brand */}
         <div className="flex items-center justify-between h-20 px-6 border-b border-sidebar-border/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-sidebar-primary to-sidebar-primary/80 rounded-xl flex items-center justify-center shadow-lg shadow-sidebar-primary/20">
-              <TrendingUp className="w-6 h-6 text-sidebar-primary-foreground" />
-            </div>
-            {sidebarOpen && (
-              <div className="flex flex-col">
-                <span className="text-2xl font-extrabold text-white">
-                  {t("sidebar.brand")}
-                </span>
-                <span className="text-xs text-white/80 font-medium">{t("sidebar.tagline")}</span>
-              </div>
-            )}
+          <div className="flex items-center justify-center w-full">
+            <img 
+              src="/logo_nova.svg" 
+              alt="NovaFinance" 
+              className={`${sidebarOpen ? "h-72" : "h-48"} object-contain transition-all`}
+            />
           </div>
           <button
+            type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="text-white/90 hover:bg-white/10 rounded-lg p-2 transition-all hover:text-white"
           >
@@ -109,6 +147,24 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
+          {/* Sélecteur d'année fiscale */}
+          {sidebarOpen && (
+            <div className="mb-4 px-4">
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
+                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-sidebar-primary cursor-pointer hover:bg-white/15 transition-colors"
+                aria-label="Sélectionner l'année fiscale"
+                title="Sélectionner l'année fiscale"
+              >
+                {availableYears.map((year) => (
+                  <option key={year} value={year} className="bg-[hsl(222.2,47.4%,11.2%)]">
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {navigationItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -176,20 +232,47 @@ export default function MainLayout({ children }: MainLayoutProps) {
             </div>
           </div>
           <div className="flex items-center gap-4 ml-6">
-            <button className="relative text-foreground/70 hover:text-foreground transition-colors p-2 hover:bg-muted/50 rounded-lg">
+            <button 
+              type="button" 
+              aria-label="Notifications"
+              className="relative text-foreground/70 hover:text-foreground transition-colors p-2 hover:bg-muted/50 rounded-lg"
+            >
               <Bell className="w-5 h-5" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full border-2 border-card" />
             </button>
-            <div className="flex items-center gap-3 pl-4 border-l border-border">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-3 pl-4 border-l border-border hover:opacity-80 transition-opacity cursor-pointer">
               <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center shadow-lg shadow-primary/20">
+                    {currentUser?.photoURL ? (
+                      <img 
+                        src={currentUser.photoURL} 
+                        alt={currentUser.displayName || "User"} 
+                        className="w-10 h-10 rounded-full"
+                      />
+                    ) : (
                 <User className="w-5 h-5 text-primary-foreground" />
+                    )}
               </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-semibold text-foreground">{t("header.user")}</span>
-                <span className="text-xs text-muted-foreground">{t("header.admin")}</span>
+                  <div className="flex flex-col text-left">
+                    <span className="text-sm font-semibold text-foreground">
+                      {currentUser?.displayName || currentUser?.email || t("header.user")}
+                    </span>
               </div>
               <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => navigate("/settings")}>
+                  <Settings className="w-4 h-4 mr-2" />
+                  {t("sidebar.settings")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Déconnexion
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

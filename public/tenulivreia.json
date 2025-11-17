@@ -1,0 +1,374 @@
+{
+  "meta": {
+    "version": "2025-11-16",
+    "jurisdiction": {
+      "country": "Canada",
+      "province": "Quebec"
+    },
+    "supported_entity_types": [
+      "sole_proprietorship",
+      "partnership",
+      "corporation_CCPC"
+    ],
+    "currency": "CAD",
+    "notes": "Règles simplifiées pour automatisation de tenue de livres et préparation fiscale PME Québec."
+  },
+  "tax": {
+    "federal": {
+      "income_tax": {
+        "return_type": "T2",
+        "filing_deadline_months_after_year_end": 6,
+        "small_business_deduction": {
+          "business_limit": 500000,
+          "required_entity_type": "corporation_CCPC",
+          "capital_taxable_thresholds": {
+            "phaseout_start": 10000000,
+            "phaseout_end": 15000000
+          },
+          "passive_income_limit": {
+            "threshold": 50000
+          }
+        },
+        "general_rule_revenue": {
+          "description": "Tout revenu provenant d’une activité commerciale, professionnelle ou autre entreprise à but lucratif doit être déclaré.",
+          "includes": [
+            "ventes de biens",
+            "prestations de services",
+            "honoraires professionnels",
+            "commissions",
+            "revenu de sous-traitance"
+          ]
+        }
+      },
+      "sales_tax_GST": {
+        "tax_name": "GST",
+        "rate": 0.05,
+        "small_supplier_threshold_last_12_months": 30000,
+        "registration_required_if_exceeds_threshold": true,
+        "classification_categories": [
+          "taxable",
+          "zero_rated",
+          "exempt"
+        ],
+        "input_tax_credit_key": "ITC",
+        "rules": [
+          {
+            "id": "GST_REG_REQUIRED",
+            "condition_description": "Revenus taxables > 30 000 CAD dans une période glissante de 12 mois",
+            "pseudo_condition": "taxable_revenue_last_12m > 30000",
+            "action": "require_registration"
+          },
+          {
+            "id": "GST_ITC_ELIGIBLE",
+            "condition_description": "Dépense engagée pour l’activité commerciale taxable, avec facture valide et GST séparée",
+            "pseudo_condition": "expense.business_use_ratio > 0 AND expense.has_valid_invoice = true",
+            "action": "mark_GST_as_ITC_eligible"
+          }
+        ]
+      },
+      "deductible_expenses": {
+        "general_rule": {
+          "description": "Une dépense est déductible si elle est engagée pour gagner un revenu d’entreprise, raisonnable et justifiée par des pièces probantes.",
+          "required_flags": [
+            "business_purpose",
+            "reasonableness",
+            "supporting_document"
+          ]
+        },
+        "categories": [
+          {
+            "code": "SUPPLIES",
+            "label": "Fournitures",
+            "examples": [
+              "fournitures de bureau",
+              "petit matériel non capitalisable",
+              "papier, cartouches, etc."
+            ],
+            "default_deductible_ratio": 1.0
+          },
+          {
+            "code": "RENT",
+            "label": "Loyer",
+            "examples": [
+              "loyer de bureau",
+              "loyer d’atelier",
+              "espace commercial"
+            ],
+            "default_deductible_ratio": 1.0
+          },
+          {
+            "code": "TELECOM",
+            "label": "Télécommunications",
+            "examples": [
+              "cellulaire",
+              "internet",
+              "téléphone fixe"
+            ],
+            "default_deductible_ratio": 0.5,
+            "rule": "si usage mixte perso/pro, suggérer une ventilation, ex. 50% déductible par défaut"
+          },
+          {
+            "code": "MEALS",
+            "label": "Repas et divertissement",
+            "examples": [
+              "repas d’affaires",
+              "sorties clients"
+            ],
+            "default_deductible_ratio": 0.5,
+            "special_rule": "souvent limité à 50% du montant admissible"
+          },
+          {
+            "code": "VEHICLE",
+            "label": "Véhicule",
+            "examples": [
+              "essence",
+              "entretien",
+              "assurance auto",
+              "location"
+            ],
+            "requires_business_use_percentage": true,
+            "default_deductible_ratio": 0.0,
+            "rule": "deductible_ratio = business_km / total_km"
+          }
+        ]
+      },
+      "CCA_capital_cost_allowance": {
+        "classes": [
+          {
+            "class": "8",
+            "description": "Mobilier, équipement général",
+            "rate_declining_balance": 0.2
+          },
+          {
+            "class": "10.1",
+            "description": "Automobiles de tourisme (limite de coût)",
+            "rate_declining_balance": 0.3,
+            "cost_limit": 30000
+          },
+          {
+            "class": "50",
+            "description": "Ordinateurs et matériel connexe",
+            "rate_declining_balance": 0.55
+          },
+          {
+            "class": "12",
+            "description": "Logiciels",
+            "rate_declining_balance": 1.0
+          }
+        ],
+        "general_rules": [
+          "Les actifs doivent être capitalisés si leur coût dépasse un seuil (ex. 500 CAD) ou s’ils ont une durée de vie utile prolongée.",
+          "La CCA est généralement discrétionnaire : l’entreprise peut demander moins que le maximum."
+        ]
+      }
+    },
+    "provincial_quebec": {
+      "income_tax": {
+        "return_type": "CO-17",
+        "filing_deadline_months_after_year_end": 6,
+        "small_business_deduction_QC": {
+          "business_limit": 500000,
+          "base_rate_general": 0.115,
+          "reduced_rate_PME_approx": 0.032,
+          "hours_rule": {
+            "description": "Règle des 5 500 heures rémunérées au Québec",
+            "full_benefit_min_hours": 5500,
+            "partial_benefit_min_hours": 5000,
+            "no_benefit_below_hours": 5000
+          },
+          "sector_exceptions": [
+            "manufacturing",
+            "primary_sector"
+          ]
+        }
+      },
+      "sales_tax_QST": {
+        "tax_name": "QST",
+        "rate": 0.09975,
+        "small_supplier_threshold_last_12_months": 30000,
+        "registration_required_if_exceeds_threshold": true,
+        "classification_categories": [
+          "taxable",
+          "zero_rated",
+          "exempt"
+        ],
+        "input_tax_credit_key": "ITC_QST",
+        "rules": [
+          {
+            "id": "QST_REG_REQUIRED",
+            "condition_description": "Revenus taxables > 30 000 CAD dans une période glissante de 12 mois",
+            "pseudo_condition": "taxable_revenue_last_12m > 30000",
+            "action": "require_registration"
+          },
+          {
+            "id": "QST_ITC_ELIGIBLE",
+            "condition_description": "Dépense engagée pour l’activité commerciale taxable au Québec, avec facture valide et QST indiquée",
+            "pseudo_condition": "expense.business_use_ratio > 0 AND expense.has_valid_invoice = true",
+            "action": "mark_QST_as_ITC_eligible"
+          }
+        ]
+      },
+      "credits_incentives": {
+        "examples": [
+          {
+            "code": "TRAINING_SME",
+            "label": "Crédit d’impôt pour la formation d’un travailleur à l’emploi d’une PME",
+            "eligibility_high_level": [
+              "masse_salariale < 7000000",
+              "dépenses de formation admissibles",
+              "période admissible (voir années d’application)"
+            ]
+          },
+          {
+            "code": "INNOVATION",
+            "label": "Crédits d’impôt à l’innovation / R-D",
+            "eligibility_high_level": [
+              "dépenses de R-D admissibles",
+              "documentation technique",
+              "projets d’innovation structurés"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "bookkeeping_rules": {
+    "transaction_classification": {
+      "types": [
+        "revenue",
+        "expense",
+        "asset_purchase",
+        "liability",
+        "equity",
+        "tax_collected",
+        "tax_paid",
+        "transfer",
+        "owner_draw_or_contribution"
+      ],
+      "classification_logic_examples": [
+        {
+          "id": "IS_REVENUE",
+          "condition_description": "Description contient mots-clés vente ou client, montant positif, compte bancaire ou paiement reçu",
+          "pseudo_condition": "text_contains_any(description, ['vente','client','facture','paiement']) AND amount > 0",
+          "suggested_type": "revenue"
+        },
+        {
+          "id": "IS_TRANSFER",
+          "condition_description": "Transaction entre deux comptes appartenant à la même entité",
+          "pseudo_condition": "source_account.owner_id = dest_account.owner_id AND payee IS NULL",
+          "suggested_type": "transfer"
+        },
+        {
+          "id": "IS_ASSET_PURCHASE",
+          "condition_description": "Montant élevé, fournisseur équipement, mots-clés matériel ou ordinateur",
+          "pseudo_condition": "amount >= 500 AND text_contains_any(description, ['ordinateur','équipement','mobilier','machine'])",
+          "suggested_type": "asset_purchase"
+        }
+      ]
+    },
+    "expense_validation": {
+      "required_flags": [
+        "has_receipt",
+        "business_purpose",
+        "date_within_fiscal_year"
+      ],
+      "soft_checks": [
+        "reasonableness_vs_category_average",
+        "supplier_known_or_new",
+        "duplicate_detection"
+      ],
+      "duplicate_detection_rule": {
+        "description": "Détection de doublons potentiels",
+        "pseudo_condition": "same_amount_same_supplier_same_date_within_X_days",
+        "action": "flag_potential_duplicate"
+      }
+    },
+    "mixed_use_rules": {
+      "vehicle": {
+        "requires_km_log": true,
+        "deductible_ratio_formula": "business_km / total_km",
+        "fields_required": [
+          "business_km",
+          "total_km"
+        ]
+      },
+      "home_office": {
+        "requires_area_ratio": true,
+        "deductible_ratio_formula": "business_area / total_area",
+        "fields_required": [
+          "business_area",
+          "total_area"
+        ]
+      },
+      "phone_internet": {
+        "default_business_ratio": 0.5,
+        "allow_manual_override": true
+      }
+    },
+    "assets_and_depreciation": {
+      "capitalization_threshold_default": 500,
+      "rule": "Si coût >= threshold ET durée de vie > 1 an, classer comme actif.",
+      "fields_required_per_asset": [
+        "description",
+        "purchase_date",
+        "cost",
+        "CCA_class",
+        "use_start_date"
+      ]
+    }
+  },
+  "workflows": {
+    "GST_QST_return": {
+      "id": "WF_SALES_TAX_RETURN",
+      "steps": [
+        "extraire toutes les ventes taxables pour la période",
+        "calculer GST_collectée et QST_collectée",
+        "extraire toutes les dépenses avec GST/QST payées",
+        "calculer ITC_GST et ITC_QST admissibles",
+        "calculer soldes nets à remettre (ou crédit)",
+        "générer un sommaire pour l’utilisateur",
+        "marquer la période comme déclarée une fois validée"
+      ],
+      "periodicity_options": [
+        "monthly",
+        "quarterly",
+        "annually"
+      ]
+    },
+    "year_end_closure": {
+      "id": "WF_YEAR_END",
+      "steps": [
+        "verrouiller les périodes de GST/QST",
+        "reclassifier les transactions non catégorisées",
+        "générer états financiers (état des résultats, bilan)",
+        "calculer CCA pour chaque actif",
+        "calculer revenu net fiscal (ajustements fédéral + QC)",
+        "produire données prêtes pour T2 et CO-17",
+        "générer rapport d’anomalies et points à valider avec CPA"
+      ]
+    },
+    "anomaly_detection": {
+      "id": "WF_ANOMALY",
+      "rules": [
+        {
+          "id": "EXPENSE_OUTLIER",
+          "description": "Dépense significativement plus élevée que la médiane pour cette catégorie",
+          "pseudo_condition": "amount > median(category_amounts)*3",
+          "action": "flag_for_review"
+        },
+        {
+          "id": "UNKNOWN_SUPPLIER",
+          "description": "Nouveau fournisseur non vu précédemment",
+          "pseudo_condition": "supplier NOT IN known_suppliers",
+          "action": "flag_as_new_supplier"
+        },
+        {
+          "id": "BANK_DEPOSIT_NO_REVENUE",
+          "description": "Dépôt bancaire sans facture ou revenu associé",
+          "pseudo_condition": "transaction.type = 'deposit' AND no_linked_invoice",
+          "action": "flag_as_potential_unrecorded_revenue"
+        }
+      ]
+    }
+  }
+}

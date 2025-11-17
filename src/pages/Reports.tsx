@@ -1,17 +1,20 @@
 import MainLayout from "../layouts/MainLayout";
 import { Plus, Download, Calendar } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAuth } from "../contexts/AuthContext";
 import React, { useState } from "react";
 
 export default function Reports() {
   const { t } = useLanguage();
+  const { currentUser } = useAuth();
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [reportPeriod, setReportPeriod] = useState("Année en cours");
   const [reportFormat, setReportFormat] = useState("PDF");
   
-  const reports = [
+  // Données mock uniquement pour la démo quand l'utilisateur n'est pas connecté
+  const mockReports = [
     {
       id: 1,
       name: "Year-End Financial Summary 2023",
@@ -34,6 +37,9 @@ export default function Reports() {
       generated: "2024-01-05",
     },
   ];
+  
+  // Les données mock sont uniquement pour la démo quand l'utilisateur n'est pas connecté
+  const reports = currentUser ? [] : mockReports;
 
   // Fonction pour générer un rapport
   const handleGenerateReport = (templateTitle?: string) => {
@@ -535,26 +541,26 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
   return (
     <MainLayout>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">{t("reports.title")}</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-bold text-foreground mb-1">{t("reports.title")}</h1>
+          <p className="text-sm text-muted-foreground">
             {t("reports.subtitle")}
           </p>
         </div>
         <button 
           onClick={() => handleGenerateReport()}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium"
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium text-sm"
         >
-          <Plus className="w-5 h-5" />
+          <Plus className="w-4 h-4" />
           <span>{t("reports.generateReport")}</span>
         </button>
       </div>
 
       {/* Report Templates */}
-      <div className="mb-12">
-        <h2 className="text-xl font-bold text-foreground mb-4">{t("reports.templates")}</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="mb-6">
+        <h2 className="text-lg font-bold text-foreground mb-3">{t("reports.templates")}</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[
             {
               title: t("reports.incomeStatement"),
@@ -589,20 +595,20 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
           ].map((template, idx) => (
             <div
               key={idx}
-              className="bg-card rounded-lg border border-border p-6 hover:shadow-md transition-shadow cursor-pointer group"
+              className="bg-card rounded-lg border border-border p-4 hover:shadow-md transition-shadow cursor-pointer group"
             >
-              <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
+              <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">
                 {template.icon}
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">
+              <h3 className="text-base font-semibold text-foreground mb-1">
                 {template.title}
               </h3>
-              <p className="text-sm text-muted-foreground mb-4">
+              <p className="text-xs text-muted-foreground mb-3">
                 {template.description}
               </p>
               <button 
                 onClick={() => handleGenerateReport(template.title)}
-                className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+                className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
               >
                 {t("reports.generate")} →
               </button>
@@ -613,8 +619,8 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
 
       {/* Recent Reports */}
       <div className="bg-card rounded-lg border border-border shadow-sm">
-        <div className="p-6 border-b border-border">
-          <h2 className="text-xl font-bold text-foreground">{t("reports.recentReports")}</h2>
+        <div className="p-4 border-b border-border">
+          <h2 className="text-lg font-bold text-foreground">{t("reports.recentReports")}</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -672,16 +678,16 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
       </div>
 
       {/* Scheduled Reports */}
-      <div className="mt-8 bg-card rounded-lg border border-border p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-foreground mb-4">{t("reports.scheduledReports")}</h2>
-        <p className="text-muted-foreground mb-4">
+      <div className="mt-6 bg-card rounded-lg border border-border p-4 shadow-sm">
+        <h2 className="text-lg font-bold text-foreground mb-3">{t("reports.scheduledReports")}</h2>
+        <p className="text-sm text-muted-foreground mb-3">
           {t("reports.scheduledDesc")}
         </p>
         <button 
           onClick={handleScheduleReport}
-          className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
+          className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium text-sm"
         >
-          <Calendar className="w-5 h-5" />
+          <Calendar className="w-4 h-4" />
           <span>{t("reports.scheduleReport")}</span>
         </button>
       </div>
@@ -689,25 +695,27 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
       {/* Generate Report Modal */}
       {showGenerateModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-lg border border-border p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold text-foreground mb-4">
+          <div className="bg-card rounded-lg border border-border p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold text-foreground mb-3">
               {selectedTemplate 
                 ? `${t("reports.generate")} - ${selectedTemplate}`
                 : t("reports.generateReport")
               }
             </h2>
-            <p className="text-muted-foreground mb-6">
+            <p className="text-sm text-muted-foreground mb-4">
               {selectedTemplate
                 ? t("reports.generateReport")
                 : "Sélectionnez les options pour générer votre rapport."
               }
             </p>
-            <div className="space-y-4 mb-6">
+            <div className="space-y-3 mb-4">
               <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
+                <label htmlFor="report-period" className="text-xs font-medium text-foreground block mb-1">
                   Période
                 </label>
                 <select 
+                  id="report-period"
+                  name="period"
                   value={reportPeriod}
                   onChange={(e) => setReportPeriod(e.target.value)}
                   className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -719,10 +727,12 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
+                <label htmlFor="report-format" className="text-xs font-medium text-foreground block mb-1">
                   Format
                 </label>
                 <select 
+                  id="report-format"
+                  name="format"
                   value={reportFormat}
                   onChange={(e) => setReportFormat(e.target.value)}
                   className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -758,19 +768,19 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
       {/* Schedule Report Modal */}
       {showScheduleModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-lg border border-border p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold text-foreground mb-4">
+          <div className="bg-card rounded-lg border border-border p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold text-foreground mb-3">
               {t("reports.scheduleReport")}
             </h2>
-            <p className="text-muted-foreground mb-6">
+            <p className="text-sm text-muted-foreground mb-4">
               Configurez la programmation automatique de vos rapports.
             </p>
-            <div className="space-y-4 mb-6">
+            <div className="space-y-3 mb-4">
               <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
+                <label htmlFor="schedule-report-type" className="text-xs font-medium text-foreground block mb-1">
                   Type de rapport
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+                <select id="schedule-report-type" name="reportType" className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
                   <option>{t("reports.incomeStatement")}</option>
                   <option>{t("reports.balanceSheet")}</option>
                   <option>{t("reports.cashFlow")}</option>
@@ -778,10 +788,10 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
+                <label htmlFor="schedule-frequency" className="text-xs font-medium text-foreground block mb-1">
                   Fréquence
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+                <select id="schedule-frequency" name="frequency" className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
                   <option>Quotidien</option>
                   <option>Hebdomadaire</option>
                   <option>Mensuel</option>
@@ -790,10 +800,12 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
                 </select>
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
+                <label htmlFor="schedule-start-date" className="text-xs font-medium text-foreground block mb-1">
                   Date de début
                 </label>
                 <input
+                  id="schedule-start-date"
+                  name="startDate"
                   type="date"
                   className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />

@@ -2,7 +2,9 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 import { useLanguage } from "../contexts/LanguageContext";
-import { useFiscalYear, getFiscalYearStartMonth } from "../hooks/use-fiscal-year";
+import { useAuth } from "../contexts/AuthContext";
+import { useFiscalYearContext } from "../contexts/FiscalYearContext";
+import { getTransactions, type Transaction } from "../lib/db";
 import {
   LineChart,
   Line,
@@ -28,61 +30,200 @@ import {
 
 export default function Dashboard() {
   const { t } = useLanguage();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
-  const fiscalYearStartMonth = getFiscalYearStartMonth();
-  const fiscalYear = useFiscalYear(fiscalYearStartMonth);
+  const { selectedYear } = useFiscalYearContext();
   const [selectedPeriod, setSelectedPeriod] = useState("ytd");
-  const [selectedYear, setSelectedYear] = useState(fiscalYear);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   
-  // Données vides pour les années 2020-2024
-  const shouldShowMockData = selectedYear < 2020 || selectedYear > 2024;
-  
-  const revenueData = shouldShowMockData ? [
-    { month: t("dashboard.monthJan"), revenue: 4000, expenses: 2400 },
-    { month: t("dashboard.monthFeb"), revenue: 3000, expenses: 1398 },
-    { month: t("dashboard.monthMar"), revenue: 2000, expenses: 9800 },
-    { month: t("dashboard.monthApr"), revenue: 2780, expenses: 3908 },
-    { month: t("dashboard.monthMay"), revenue: 1890, expenses: 4800 },
-    { month: t("dashboard.monthJun"), revenue: 2390, expenses: 3800 },
-    { month: t("dashboard.monthJul"), revenue: 3490, expenses: 4300 },
-  ] : [];
+  // Les données mock sont uniquement pour la démo quand l'utilisateur n'est pas connecté
+  // Si l'utilisateur est connecté, on utilise les vraies données depuis Firestore
+  const shouldShowMockData = !currentUser;
 
-  const categoryData = shouldShowMockData ? [
-    { name: t("dashboard.categorySalaries"), value: 35, fill: "#2E5DB8" },
-    { name: t("dashboard.categoryOfficeSupplies"), value: 25, fill: "#0EA752" },
-    { name: t("dashboard.categoryTravel"), value: 20, fill: "#F59E0B" },
-    { name: t("dashboard.categoryEquipment"), value: 15, fill: "#EF4444" },
-    { name: t("dashboard.categoryOther"), value: 5, fill: "#8B5CF6" },
-  ] : [];
-  
-  // Générer la liste des années (année fiscale actuelle et 5 années précédentes)
-  const availableYears = Array.from({ length: 6 }, (_, i) => fiscalYear - i);
+  // Charger les transactions depuis la base de données
+  React.useEffect(() => {
+    const loadTransactions = async () => {
+      if (!currentUser) {
+        setTransactions([]);
+        return;
+      }
+      try {
+        const data = await getTransactions(selectedYear);
+        setTransactions(data);
+      } catch (error) {
+        console.error("Erreur lors du chargement des transactions:", error);
+        setTransactions([]);
+      }
+    };
 
+    loadTransactions();
+    
+    // Écouter les événements personnalisés pour les changements
+    const handleUpdate = () => {
+      loadTransactions();
+    };
+    window.addEventListener("transactionsUpdated", handleUpdate);
+
+    return () => {
+      window.removeEventListener("transactionsUpdated", handleUpdate);
+    };
+  }, [selectedYear, currentUser]);
+
+  // Calculer les statistiques réelles à partir des transactions
+  const totalIncome = transactions
+    .filter((t) => t.type === "income")
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalExpenses = transactions
+    .filter((t) => t.type === "expense")
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const netIncome = totalIncome - totalExpenses;
+  const margin = totalIncome > 0 ? ((netIncome / totalIncome) * 100).toFixed(1) : "0";
+
+  // Calculer les données mensuelles à partir des transactions réelles
+  const calculateMonthlyData = () => {
+    if (shouldShowMockData) {
+      return [
+        { month: t("dashboard.monthJan"), revenue: 4000, expenses: 2400 },
+        { month: t("dashboard.monthFeb"), revenue: 3000, expenses: 1398 },
+        { month: t("dashboard.monthMar"), revenue: 2000, expenses: 9800 },
+        { month: t("dashboard.monthApr"), revenue: 2780, expenses: 3908 },
+        { month: t("dashboard.monthMay"), revenue: 1890, expenses: 4800 },
+        { month: t("dashboard.monthJun"), revenue: 2390, expenses: 3800 },
+        { month: t("dashboard.monthJul"), revenue: 3490, expenses: 4300 },
+      ];
+    }
+
+    // Grouper les transactions par mois
+    const monthlyData: { [key: string]: { revenue: number; expenses: number } } = {};
+    const monthNames = [
+      t("dashboard.monthJan"), t("dashboard.monthFeb"), t("dashboard.monthMar"),
+      t("dashboard.monthApr"), t("dashboard.monthMay"), t("dashboard.monthJun"),
+      t("dashboard.monthJul"), t("dashboard.monthAug"), t("dashboard.monthSep"),
+      t("dashboard.monthOct"), t("dashboard.monthNov"), t("dashboard.monthDec"),
+    ];
+
+    transactions.forEach((transaction) => {
+      try {
+        const date = new Date(transaction.date);
+        if (isNaN(date.getTime())) {
+          console.warn("Date invalide:", transaction.date);
+          return;
+        }
+        const monthIndex = date.getMonth();
+        const monthKey = monthNames[monthIndex];
+        
+        if (!monthKey) {
+          console.warn("Mois invalide pour l'index:", monthIndex);
+          return;
+        }
+
+        if (!monthlyData[monthKey]) {
+          monthlyData[monthKey] = { revenue: 0, expenses: 0 };
+        }
+
+        if (transaction.type === "income") {
+          monthlyData[monthKey].revenue += transaction.amount;
+        } else {
+          monthlyData[monthKey].expenses += transaction.amount;
+        }
+      } catch (error) {
+        console.error("Erreur lors du traitement de la transaction:", transaction, error);
+      }
+    });
+
+    // Convertir en tableau et trier par mois
+    return monthNames.map((month) => ({
+      month,
+      revenue: monthlyData[month]?.revenue || 0,
+      expenses: monthlyData[month]?.expenses || 0,
+    }));
+  };
+
+  const revenueData = calculateMonthlyData();
+
+  // Calculer les données de catégories à partir des transactions réelles
+  const calculateCategoryData = () => {
+    if (shouldShowMockData) {
+      return [
+        { name: t("dashboard.categorySalaries"), value: 35, fill: "#2E5DB8" },
+        { name: t("dashboard.categoryOfficeSupplies"), value: 25, fill: "#0EA752" },
+        { name: t("dashboard.categoryTravel"), value: 20, fill: "#F59E0B" },
+        { name: t("dashboard.categoryEquipment"), value: 15, fill: "#EF4444" },
+        { name: t("dashboard.categoryOther"), value: 5, fill: "#60A5FA" },
+      ];
+    }
+
+    // Grouper les dépenses par catégorie
+    const categoryTotals: { [key: string]: number } = {};
+    // Couleurs par défaut pour les catégories (utiliser les noms réels des catégories)
+    const categoryColors: { [key: string]: string } = {
+      "Salaires": "#2E5DB8",
+      "Fournitures de bureau": "#0EA752",
+      "Voyage": "#F59E0B",
+      "Équipement": "#EF4444",
+      "Autre": "#60A5FA",
+      // Catégories en anglais aussi
+      "Salaries": "#2E5DB8",
+      "Office Supplies": "#0EA752",
+      "Travel": "#F59E0B",
+      "Equipment": "#EF4444",
+      "Other": "#60A5FA",
+    };
+
+    transactions
+      .filter((t) => t.type === "expense")
+      .forEach((transaction) => {
+        // Utiliser la catégorie telle quelle (pas de traduction pour éviter les clés)
+        const category = transaction.category || "Autre";
+        categoryTotals[category] = (categoryTotals[category] || 0) + transaction.amount;
+      });
+
+    // Calculer le total pour les pourcentages
+    const totalExpenses = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
+
+    if (totalExpenses === 0) {
+      return [];
+    }
+
+    // Convertir en tableau avec pourcentages
+    return Object.entries(categoryTotals)
+      .map(([name, amount]) => ({
+        name,
+        value: Math.round((amount / totalExpenses) * 100),
+        fill: categoryColors[name] || "#60A5FA",
+      }))
+      .sort((a, b) => b.value - a.value);
+  };
+
+  const categoryData = calculateCategoryData();
+  
   const stats = [
     {
       label: `${t("dashboard.revenue")} ${selectedYear}`,
-      value: shouldShowMockData ? "$24,590" : "$0",
+      value: shouldShowMockData ? "24,590 $" : `${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`,
       change: shouldShowMockData ? "+12.5%" : "0%",
       positive: true,
       icon: TrendingUp,
     },
     {
       label: `${t("dashboard.expenses")} ${selectedYear}`,
-      value: shouldShowMockData ? "$18,420" : "$0",
+      value: shouldShowMockData ? "18,420 $" : `${totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`,
       change: shouldShowMockData ? "-5.2%" : "0%",
       positive: true,
       icon: TrendingDown,
     },
     {
       label: `${t("dashboard.income")} ${selectedYear}`,
-      value: shouldShowMockData ? "$6,170" : "$0",
+      value: shouldShowMockData ? "6,170 $" : `${netIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`,
       change: shouldShowMockData ? "+8.3%" : "0%",
-      positive: true,
+      positive: netIncome >= 0,
       icon: DollarSign,
     },
     {
       label: t("dashboard.margin"),
-      value: shouldShowMockData ? "25.1%" : "0%",
+      value: shouldShowMockData ? "25.1%" : `${margin}%`,
       change: shouldShowMockData ? "+2.1%" : "0%",
       positive: true,
       icon: TrendingUp,
@@ -92,16 +233,16 @@ export default function Dashboard() {
   return (
     <MainLayout>
       {/* Header */}
-      <div className="mb-10">
+      <div className="mb-6">
         <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 bg-success rounded-full animate-pulse" />
-              <h1 className="text-5xl font-extrabold bg-gradient-to-r from-primary via-primary/90 to-accent bg-clip-text text-transparent">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-primary via-primary/90 to-accent bg-clip-text text-transparent">
                 {t("dashboard.title")}
               </h1>
             </div>
-            <p className="text-muted-foreground text-xl font-medium">
+            <p className="text-muted-foreground text-sm">
               {t("dashboard.subtitle")}
             </p>
           </div>
@@ -109,13 +250,16 @@ export default function Dashboard() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-8">
-        <div className="flex items-center gap-3 bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl px-4 py-2.5">
-          <Calendar className="w-5 h-5 text-muted-foreground" />
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <div className="flex items-center gap-2 bg-card/50 backdrop-blur-sm border border-border/50 rounded-lg px-3 py-1.5">
+          <Calendar className="w-4 h-4 text-muted-foreground" />
           <select
+            id="dashboard-period"
+            name="period"
             value={selectedPeriod}
             onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="bg-transparent border-none text-foreground font-medium focus:outline-none cursor-pointer"
+            className="bg-transparent border-none text-foreground text-sm font-medium focus:outline-none cursor-pointer"
+            aria-label="Sélectionner la période"
           >
             <option value="mtd">{t("dashboard.periodThisMonth")}</option>
             <option value="qtd">{t("dashboard.periodThisQuarter")}</option>
@@ -123,59 +267,46 @@ export default function Dashboard() {
             <option value="all">{t("dashboard.periodAllTime")}</option>
           </select>
         </div>
-        <div className="flex items-center gap-3 bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl px-4 py-2.5">
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
-            className="bg-transparent border-none text-foreground font-medium focus:outline-none cursor-pointer"
-          >
-            {availableYears.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button className="flex items-center gap-2 px-5 py-2.5 bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl text-foreground hover:bg-card hover:border-primary/50 transition-all font-medium">
+        <button className="flex items-center gap-2 px-3 py-1.5 bg-card/50 backdrop-blur-sm border border-border/50 rounded-lg text-foreground hover:bg-card hover:border-primary/50 transition-all text-sm font-medium">
           <Filter className="w-4 h-4" />
           <span>{t("dashboard.moreFilters")}</span>
         </button>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon;
           const colors = [
             "from-blue-400/30 via-blue-500/20 to-blue-600/10",
             "from-emerald-400/30 via-emerald-500/20 to-emerald-600/10",
-            "from-violet-400/30 via-violet-500/20 to-violet-600/10",
+            "from-sky-400/30 via-sky-500/20 to-sky-600/10",
             "from-amber-400/30 via-amber-500/20 to-amber-600/10",
           ];
           const borderColors = [
             "border-blue-200/50",
             "border-emerald-200/50",
-            "border-violet-200/50",
+            "border-sky-200/50",
             "border-amber-200/50",
           ];
           return (
             <div
               key={index}
-              className={`group relative bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-3xl border-2 ${borderColors[index]} p-7 shadow-xl hover:shadow-2xl transition-all duration-500 overflow-hidden transform hover:-translate-y-1`}
+              className={`group relative bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-xl border ${borderColors[index]} p-4 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden`}
             >
-              <div className={`absolute inset-0 bg-gradient-to-br ${colors[index]} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+              <div className={`absolute inset-0 bg-gradient-to-br ${colors[index]} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
               <div className="relative z-10">
-                <div className="flex items-start justify-between mb-5">
+                <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
-                    <p className="text-sm text-muted-foreground mb-4 font-semibold uppercase tracking-wide">
+                    <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
                       {stat.label}
                     </p>
-                    <h3 className="text-2xl font-extrabold text-foreground mb-3 bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+                    <h3 className="text-lg font-bold text-foreground mb-2">
                       {stat.value}
                     </h3>
-                    <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-1">
                       <span
-                        className={`text-base font-bold px-2.5 py-1 rounded-lg w-fit ${
+                        className={`text-xs font-semibold px-2 py-0.5 rounded w-fit ${
                           stat.positive 
                             ? "text-success bg-success/10" 
                             : "text-destructive bg-destructive/10"
@@ -183,14 +314,14 @@ export default function Dashboard() {
                       >
                         {stat.change}
                       </span>
-                      <span className="text-xs text-muted-foreground font-medium">{t("dashboard.vsLastPeriod")}</span>
+                      <span className="text-[10px] text-muted-foreground">{t("dashboard.vsLastPeriod")}</span>
                     </div>
                   </div>
                   <div
-                    className={`bg-gradient-to-br ${colors[index]} p-4 rounded-2xl shadow-xl transform group-hover:scale-110 transition-transform duration-300`}
+                    className={`bg-gradient-to-br ${colors[index]} p-2.5 rounded-lg shadow-sm transform group-hover:scale-105 transition-transform duration-300`}
                   >
                     <Icon
-                      className={`w-7 h-7 ${
+                      className={`w-5 h-5 ${
                         stat.positive ? "text-success" : "text-destructive"
                       }`}
                     />
@@ -203,23 +334,23 @@ export default function Dashboard() {
       </div>
 
       {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         {/* Revenue vs Expenses */}
-        <div className="lg:col-span-2 bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-3xl border-2 border-primary/10 p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:border-primary/20">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-foreground">{t("dashboard.revenueVsExpenses")}</h3>
-            <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-success" />
+        <div className="lg:col-span-2 bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-primary/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-primary/20">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-foreground">{t("dashboard.revenueVsExpenses")}</h3>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-success" />
                 <span className="text-muted-foreground">{t("dashboard.revenueLabel")}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-destructive" />
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-destructive" />
                 <span className="text-muted-foreground">{t("dashboard.expensesLabel")}</span>
               </div>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={320}>
+          <ResponsiveContainer width="100%" height={240}>
             <LineChart data={revenueData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
               <XAxis
@@ -232,8 +363,10 @@ export default function Dashboard() {
                 stroke="hsl(var(--muted-foreground))"
                 fontSize={12}
                 tickLine={false}
+                tickFormatter={(value) => `${value.toLocaleString()} $`}
               />
               <Tooltip
+                formatter={(value: number) => [`${value.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`, ""]}
                 contentStyle={{
                   backgroundColor: "hsl(var(--card))",
                   border: "1px solid hsl(var(--border))",
@@ -264,30 +397,55 @@ export default function Dashboard() {
         </div>
 
         {/* Expense Categories */}
-        <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-3xl border-2 border-accent/10 p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:border-accent/20">
-          <h3 className="text-xl font-bold text-foreground mb-6">{t("dashboard.expenseCategories")}</h3>
+        <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-accent/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-accent/20">
+          <h3 className="text-base font-semibold text-foreground mb-4">{t("dashboard.expenseCategories")}</h3>
           <ResponsiveContainer width="100%" height={320}>
             <PieChart>
               <Pie
                 data={categoryData}
                 cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                outerRadius={100}
+                cy="45%"
+                labelLine={true}
+                label={({ name, percent }) => {
+                  // Tronquer les noms longs pour éviter les débordements
+                  const shortName = name.length > 15 ? name.substring(0, 12) + "..." : name;
+                  return `${shortName}: ${(percent * 100).toFixed(0)}%`;
+                }}
+                outerRadius={90}
+                innerRadius={30}
                 fill="#8884d8"
                 dataKey="value"
+                paddingAngle={2}
               >
                 {categoryData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
                 ))}
               </Pie>
               <Tooltip
+                formatter={(value: number) => [`${value}%`, "Pourcentage"]}
+                labelFormatter={(label) => {
+                  // Trouver le nom complet depuis les données
+                  const entry = categoryData.find((d) => d.name === label || d.name.startsWith(label));
+                  return entry ? entry.name : label;
+                }}
                 contentStyle={{
                   backgroundColor: "hsl(var(--card))",
                   border: "1px solid hsl(var(--border))",
                   borderRadius: "0.75rem",
                   boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                  padding: "8px 12px",
+                }}
+              />
+              <Legend
+                verticalAlign="bottom"
+                height={36}
+                formatter={(value) => {
+                  const entry = categoryData.find((d) => d.name === value);
+                  return entry ? (entry.name.length > 20 ? entry.name.substring(0, 17) + "..." : entry.name) : value;
+                }}
+                wrapperStyle={{
+                  fontSize: "12px",
+                  paddingTop: "8px",
                 }}
               />
             </PieChart>
@@ -296,9 +454,9 @@ export default function Dashboard() {
       </div>
 
       {/* Monthly Breakdown */}
-      <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-3xl border-2 border-info/10 p-8 shadow-xl hover:shadow-2xl transition-all duration-500 hover:border-info/20 mb-8">
-        <h3 className="text-xl font-bold text-foreground mb-6">{t("dashboard.monthlyBreakdown")}</h3>
-        <ResponsiveContainer width="100%" height={320}>
+      <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-info/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-info/20 mb-6">
+        <h3 className="text-base font-semibold text-foreground mb-4">{t("dashboard.monthlyBreakdown")}</h3>
+        <ResponsiveContainer width="100%" height={240}>
           <BarChart data={revenueData}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
             <XAxis
@@ -311,8 +469,10 @@ export default function Dashboard() {
               stroke="hsl(var(--muted-foreground))"
               fontSize={12}
               tickLine={false}
+              tickFormatter={(value) => `${value.toLocaleString()} $`}
             />
             <Tooltip
+              formatter={(value: number) => [`${value.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`, ""]}
               contentStyle={{
                 backgroundColor: "hsl(var(--card))",
                 border: "1px solid hsl(var(--border))",
@@ -340,12 +500,12 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Transactions */}
-      <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-3xl border-2 border-border/30 p-8 shadow-xl hover:shadow-2xl transition-all duration-500">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-foreground">{t("dashboard.recentTransactions")}</h3>
+      <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-border/30 p-4 shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-foreground">{t("dashboard.recentTransactions")}</h3>
           <button 
             onClick={() => navigate("/transactions")}
-            className="text-sm text-primary hover:text-primary/80 font-medium transition-colors"
+            className="text-xs text-primary hover:text-primary/80 font-medium transition-colors"
           >
             {t("dashboard.viewAll")} →
           </button>
@@ -354,19 +514,19 @@ export default function Dashboard() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border/50">
-                <th className="text-left py-4 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <th className="text-left py-2 px-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                   {t("dashboard.date")}
                 </th>
-                <th className="text-left py-4 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <th className="text-left py-2 px-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                   {t("dashboard.description")}
                 </th>
-                <th className="text-left py-4 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <th className="text-left py-2 px-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                   {t("dashboard.category")}
                 </th>
-                <th className="text-left py-4 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <th className="text-left py-2 px-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                   {t("dashboard.type")}
                 </th>
-                <th className="text-right py-4 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <th className="text-right py-2 px-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                   {t("dashboard.amount")}
                 </th>
               </tr>
@@ -418,18 +578,18 @@ export default function Dashboard() {
                   key={index}
                   className="border-b border-border/30 hover:bg-muted/30 transition-colors"
                 >
-                  <td className="py-4 px-4 text-sm text-foreground font-medium">
+                  <td className="py-2 px-3 text-xs text-foreground font-medium">
                     {transaction.date}
                   </td>
-                  <td className="py-4 px-4 text-sm text-foreground">
+                  <td className="py-2 px-3 text-xs text-foreground">
                     {transaction.description}
                   </td>
-                  <td className="py-4 px-4 text-sm text-muted-foreground">
+                  <td className="py-2 px-3 text-xs text-muted-foreground">
                     {transaction.category}
                   </td>
-                  <td className="py-4 px-4 text-sm">
+                  <td className="py-2 px-3 text-xs">
                     <span
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                         transaction.type === "Income"
                           ? "bg-success/10 text-success border border-success/20"
                           : "bg-destructive/10 text-destructive border border-destructive/20"
@@ -439,16 +599,51 @@ export default function Dashboard() {
                     </span>
                   </td>
                   <td
-                    className={`py-4 px-4 text-sm font-bold text-right ${
+                    className={`py-2 px-3 text-xs font-semibold text-right ${
                       transaction.positive ? "text-success" : "text-destructive"
                     }`}
                   >
                     {transaction.amount}
                   </td>
                 </tr>
-              )) : (
+              )) : transactions.length > 0 ? (
+                transactions.slice(0, 5).map((transaction) => (
+                  <tr
+                    key={transaction.id}
+                    className="border-b border-border/30 hover:bg-muted/30 transition-colors"
+                  >
+                    <td className="py-2 px-3 text-xs text-foreground font-medium">
+                      {transaction.date}
+                    </td>
+                    <td className="py-2 px-3 text-xs text-foreground">
+                      {transaction.description}
+                    </td>
+                    <td className="py-2 px-3 text-xs text-muted-foreground">
+                      {transaction.category}
+                    </td>
+                    <td className="py-2 px-3 text-xs">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                          transaction.type === "income"
+                            ? "bg-success/10 text-success border border-success/20"
+                            : "bg-destructive/10 text-destructive border border-destructive/20"
+                        }`}
+                      >
+                        {transaction.type === "income" ? t("dashboard.incomeType") : t("dashboard.expenseType")}
+                      </span>
+                    </td>
+                    <td
+                      className={`py-2 px-3 text-xs font-semibold text-right ${
+                        transaction.type === "income" ? "text-success" : "text-destructive"
+                      }`}
+                    >
+                      {transaction.type === "income" ? "+" : "-"}${transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))
+              ) : (
                 <tr>
-                  <td colSpan={5} className="py-8 px-4 text-center text-muted-foreground">
+                  <td colSpan={5} className="py-4 px-4 text-center text-xs text-muted-foreground">
                     Aucune transaction pour cette année
                   </td>
                 </tr>

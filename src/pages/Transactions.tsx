@@ -1,105 +1,25 @@
 import { useState, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { Plus, Filter, Download, Edit2, Trash2, Search, Calendar, X, Printer } from "lucide-react";
+import { Plus, Filter, Download, Edit2, Trash2, Search, Calendar, X, Printer, DollarSign, FileText, Building2, Tag, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Paperclip, File, Trash } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
-import { useFiscalYear, getFiscalYearStartMonth } from "../hooks/use-fiscal-year";
-import { getTransactions, addTransaction, type Transaction } from "../lib/db";
+import { useAuth } from "../contexts/AuthContext";
+import { useFiscalYearContext } from "../contexts/FiscalYearContext";
+import { getTransactions, addTransaction, updateTransaction, deleteTransaction, type Transaction } from "../lib/db";
+import { db } from "../lib/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { classifyTransaction, calculateTaxes, validateExpense } from "../lib/taxRules";
+import { uploadTransactionDocument, deleteTransactionDocument, type Document } from "../lib/storage";
 import React from "react";
-
-// Transactions mock uniquement pour 2025
-const mockTransactions2025 = [
-  {
-    id: 1,
-    date: "2025-01-15",
-    description: "Client Invoice #2025-001",
-    category: "Consulting",
-    tags: ["Project A"],
-    company: "Tech Solutions Inc",
-    type: "income",
-    amount: 5000,
-  },
-  {
-    id: 2,
-    date: "2025-01-14",
-    description: "Office Supplies - Staples",
-    category: "Office Supplies",
-    tags: ["Operations"],
-    company: "Tech Solutions Inc",
-    type: "expense",
-    amount: 245.5,
-  },
-  {
-    id: 3,
-    date: "2025-01-12",
-    description: "Team Lunch Meeting",
-    category: "Meals & Entertainment",
-    tags: ["Team", "Client Meeting"],
-    company: "Creative Agency",
-    type: "expense",
-    amount: 125.75,
-  },
-  {
-    id: 4,
-    date: "2025-01-10",
-    description: "Software License - Adobe Creative Suite",
-    category: "Software",
-    tags: ["Subscriptions"],
-    company: "Creative Agency",
-    type: "expense",
-    amount: 99.99,
-  },
-  {
-    id: 5,
-    date: "2025-01-08",
-    description: "Freelance Payment - Design Work",
-    category: "Consulting",
-    tags: ["Project B"],
-    company: "Tech Solutions Inc",
-    type: "income",
-    amount: 2500,
-  },
-  {
-    id: 6,
-    date: "2025-01-07",
-    description: "Internet & Phone",
-    category: "Utilities",
-    tags: ["Monthly"],
-    company: "Tech Solutions Inc",
-    type: "expense",
-    amount: 156.25,
-  },
-  {
-    id: 7,
-    date: "2025-01-05",
-    description: "Client Payment - Retainer",
-    category: "Consulting",
-    tags: ["Recurring", "Client X"],
-    company: "Creative Agency",
-    type: "income",
-    amount: 3000,
-  },
-  {
-    id: 8,
-    date: "2025-01-03",
-    description: "Taxi/Uber Expenses",
-    category: "Travel",
-    tags: ["Business Trip"],
-    company: "Tech Solutions Inc",
-    type: "expense",
-    amount: 87.45,
-  },
-];
 
 export default function Transactions() {
   const { t } = useLanguage();
-  const fiscalYearStartMonth = getFiscalYearStartMonth();
-  const fiscalYear = useFiscalYear(fiscalYearStartMonth);
+  const { currentUser } = useAuth();
+  const { selectedYear } = useFiscalYearContext();
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">(
     "all"
   );
-  const [selectedYear, setSelectedYear] = useState(fiscalYear);
   const [customCategories, setCustomCategories] = useState<string[]>(() => {
     const saved = localStorage.getItem("customCategories");
     return saved ? JSON.parse(saved) : [];
@@ -108,16 +28,65 @@ export default function Transactions() {
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [sortColumn, setSortColumn] = useState<"date" | "company" | "category" | "tags" | "amount" | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [filterDate, setFilterDate] = useState<string | null>(null);
+  const [filterCompany, setFilterCompany] = useState<string | null>(null);
+  const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [filterAmount, setFilterAmount] = useState<"all" | "income" | "expense">("all");
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [showCompanyFilter, setShowCompanyFilter] = useState(false);
+  const [showCategoryFilter, setShowCategoryFilter] = useState(false);
+  const [showAmountFilter, setShowAmountFilter] = useState(false);
+  const [showManualTaxes, setShowManualTaxes] = useState(false);
+  const [showEditManualTaxes, setShowEditManualTaxes] = useState(false);
+  const [uploadingDocuments, setUploadingDocuments] = useState<{ [key: string]: boolean }>({});
   
+  // Charger les entreprises depuis Firestore
+  useEffect(() => {
+    const loadCompanies = async () => {
+      if (!currentUser || !db) {
+        return;
+      }
+
+      try {
+        const companiesRef = collection(db, "companies");
+        const q = query(companiesRef, where("userId", "==", currentUser.uid));
+        const snapshot = await getDocs(q);
+        
+        const companiesData: Array<{ id: string; name: string }> = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          companiesData.push({
+            id: doc.id,
+            name: data.name || "",
+          });
+        });
+        
+        setCompanies(companiesData);
+      } catch (error) {
+        console.error("Erreur lors du chargement des entreprises:", error);
+      }
+    };
+
+    loadCompanies();
+  }, [currentUser]);
+
   // Charger les transactions depuis la base de données
   useEffect(() => {
     const loadTransactions = async () => {
       setLoading(true);
+      console.log("🔄 Chargement des transactions pour l'année:", selectedYear);
       try {
         const data = await getTransactions(selectedYear);
+        console.log("📊 Transactions chargées:", data.length);
+        console.log("📋 Liste des transactions:", data);
         setTransactions(data);
       } catch (error) {
-        console.error("Erreur lors du chargement des transactions:", error);
+        console.error("❌ Erreur lors du chargement des transactions:", error);
         setTransactions([]);
       } finally {
         setLoading(false);
@@ -128,6 +97,7 @@ export default function Transactions() {
     
     // Écouter les mises à jour
     const handleUpdate = () => {
+      console.log("🔄 Événement transactionsUpdated déclenché, rechargement...");
       loadTransactions();
     };
     window.addEventListener("transactionsUpdated", handleUpdate);
@@ -175,23 +145,278 @@ export default function Transactions() {
     const form = e.currentTarget;
     const formData = new FormData(form);
     
-    const newTransaction: Omit<Transaction, "id"> = {
+    const description = (formData.get("description") as string) || "";
+    const amount = parseFloat((formData.get("amount") as string) || "0");
+    const type = (formData.get("type") as "income" | "expense") || "expense";
+    const isTaxable = formData.get("isTaxable") === "true" || formData.get("isTaxable") === "on";
+    const hasReceipt = formData.get("hasReceipt") === "true" || formData.get("hasReceipt") === "on";
+    
+    // Récupérer les valeurs manuelles de GST/QST si fournies
+    const manualGst = formData.get("manualGst") as string;
+    const manualQst = formData.get("manualQst") as string;
+    const useManualTaxes = formData.get("useManualTaxes") === "true" || formData.get("useManualTaxes") === "on";
+    
+    // Classification automatique
+    let autoClassified = false;
+    let classificationConfidence = 0;
+    let suggestedCategory = (formData.get("category") as string) || allCategories[0];
+    
+    try {
+      const classification = await classifyTransaction(description, amount);
+      if (classification.confidence > 0.6) {
+        autoClassified = true;
+        classificationConfidence = classification.confidence;
+        if (classification.suggestedCategory) {
+          suggestedCategory = classification.suggestedCategory;
+        }
+      }
+    } catch (error) {
+      console.warn("Erreur lors de la classification automatique:", error);
+    }
+    
+    // Calcul des taxes si applicable
+    let gst: number | undefined = undefined;
+    let qst: number | undefined = undefined;
+    
+    if (isTaxable && amount > 0) {
+      if (useManualTaxes) {
+        // Utiliser les valeurs manuelles si le checkbox est coché
+        if (manualGst && manualGst.trim() !== "") {
+          gst = parseFloat(manualGst) || 0;
+        }
+        if (manualQst && manualQst.trim() !== "") {
+          qst = parseFloat(manualQst) || 0;
+        }
+        // Si le checkbox est coché mais les champs sont vides, on laisse undefined
+      } else {
+        // Calculer automatiquement
+        try {
+          const taxes = await calculateTaxes(amount, true);
+          gst = taxes.gst;
+          qst = taxes.qst;
+        } catch (error) {
+          console.warn("Erreur lors du calcul des taxes:", error);
+        }
+      }
+    }
+    
+    // Validation des dépenses
+    let deductibleRatio = 1.0;
+    if (type === "expense") {
+      try {
+        const validation = await validateExpense({
+          amount,
+          category: suggestedCategory,
+          description,
+          date: (formData.get("date") as string) || new Date().toISOString().split('T')[0],
+          hasReceipt,
+          businessPurpose: formData.get("businessPurpose") as string || undefined
+        });
+        deductibleRatio = validation.deductibleRatio;
+      } catch (error) {
+        console.warn("Erreur lors de la validation de la dépense:", error);
+      }
+    }
+    
+    const newTransaction: Omit<Transaction, "id" | "userId" | "createdAt" | "updatedAt"> = {
       date: (formData.get("date") as string) || new Date().toISOString().split('T')[0],
-      description: (formData.get("description") as string) || "",
-      category: (formData.get("category") as string) || allCategories[0],
-      type: (formData.get("type") as "income" | "expense") || "expense",
-      amount: parseFloat((formData.get("amount") as string) || "0"),
-      company: "Tech Solutions Inc", // Par défaut, peut être modifié plus tard
+      description,
+      category: suggestedCategory,
+      type,
+      amount,
+      company: (formData.get("company") as string) || (companies.length > 0 ? companies[0].name : ""),
       tags: [],
+      // Champs fiscaux
+      // Si useManualTaxes est coché, utiliser les valeurs saisies (même si 0), sinon utiliser les valeurs calculées
+      gst: useManualTaxes ? gst : (gst && gst > 0 ? gst : undefined),
+      qst: useManualTaxes ? qst : (qst && qst > 0 ? qst : undefined),
+      isTaxable: isTaxable || undefined,
+      hasReceipt: hasReceipt || undefined,
+      businessPurpose: (formData.get("businessPurpose") as string) || undefined,
+      deductibleRatio: deductibleRatio < 1.0 ? deductibleRatio : undefined,
+      // ITC (Input Tax Credits)
+      gstItc: formData.get("gstItc") ? parseFloat(formData.get("gstItc") as string) || undefined : undefined,
+      qstItc: formData.get("qstItc") ? parseFloat(formData.get("qstItc") as string) || undefined : undefined,
+      // Classification automatique
+      autoClassified: autoClassified || undefined,
+      classificationConfidence: classificationConfidence > 0 ? classificationConfidence : undefined,
     };
     
     if (newTransaction.amount > 0 && newTransaction.description) {
+      console.log("🔄 Tentative d'ajout de transaction:", newTransaction);
       const id = await addTransaction(newTransaction);
       if (id) {
+        console.log("✅ Transaction ajoutée avec succès, ID:", id);
         setShowAddModal(false);
         form.reset();
         // Les transactions seront rechargées automatiquement via l'événement
+      } else {
+        console.error("❌ Échec de l'ajout de la transaction");
+        alert("Erreur lors de l'ajout de la transaction. Vérifiez la console pour plus de détails.");
       }
+    } else {
+      console.warn("⚠️ Transaction invalide:", newTransaction);
+      alert("Veuillez remplir tous les champs requis (montant et description).");
+    }
+  };
+
+  // Fonction pour modifier une transaction
+  const handleEditTransaction = (transaction: Transaction) => {
+    setEditingTransaction(transaction);
+    setShowEditModal(true);
+    // Afficher les champs manuels si des valeurs GST/QST existent déjà
+    setShowEditManualTaxes(!!(transaction.gst !== undefined || transaction.qst !== undefined));
+  };
+
+  // Fonction pour mettre à jour une transaction
+  const handleUpdateTransaction = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingTransaction) return;
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    
+    const description = (formData.get("description") as string) || editingTransaction.description || "";
+    const amount = parseFloat((formData.get("amount") as string) || "0") || editingTransaction.amount;
+    const type = (formData.get("type") as "income" | "expense") || editingTransaction.type;
+    const isTaxable = formData.get("isTaxable") === "true" || formData.get("isTaxable") === "on";
+    const hasReceipt = formData.get("hasReceipt") === "true" || formData.get("hasReceipt") === "on";
+    
+    // Récupérer les valeurs manuelles de GST/QST si fournies
+    const manualGst = formData.get("manualGst") as string;
+    const manualQst = formData.get("manualQst") as string;
+    const useManualTaxes = formData.get("useManualTaxes") === "true" || formData.get("useManualTaxes") === "on";
+    
+    // Calcul des taxes si applicable
+    let gst: number | undefined = undefined;
+    let qst: number | undefined = undefined;
+    
+    if (isTaxable && amount > 0) {
+      if (useManualTaxes) {
+        // Utiliser les valeurs manuelles si le checkbox est coché
+        if (manualGst && manualGst.trim() !== "") {
+          gst = parseFloat(manualGst) || 0;
+        }
+        if (manualQst && manualQst.trim() !== "") {
+          qst = parseFloat(manualQst) || 0;
+        }
+        // Si le checkbox est coché mais les champs sont vides, on laisse undefined
+      } else {
+        // Calculer automatiquement
+        try {
+          const taxes = await calculateTaxes(amount, true);
+          gst = taxes.gst;
+          qst = taxes.qst;
+        } catch (error) {
+          console.warn("Erreur lors du calcul des taxes:", error);
+        }
+      }
+    }
+    
+    // Validation des dépenses
+    let deductibleRatio = 1.0;
+    if (type === "expense") {
+      try {
+        const validation = await validateExpense({
+          amount,
+          category: (formData.get("category") as string) || editingTransaction.category || "",
+          description,
+          date: (formData.get("date") as string) || editingTransaction.date,
+          hasReceipt,
+          businessPurpose: formData.get("businessPurpose") as string || undefined
+        });
+        deductibleRatio = validation.deductibleRatio;
+      } catch (error) {
+        console.warn("Erreur lors de la validation de la dépense:", error);
+      }
+    }
+    
+    const updates = {
+      date: (formData.get("date") as string) || editingTransaction.date,
+      description,
+      category: (formData.get("category") as string) || editingTransaction.category || "",
+      type,
+      amount,
+      company: (formData.get("company") as string) || editingTransaction.company || "",
+      tags: editingTransaction.tags || [],
+      // Champs fiscaux
+      // Si useManualTaxes est coché, utiliser les valeurs saisies (même si 0), sinon utiliser les valeurs calculées
+      gst: useManualTaxes ? gst : (gst && gst > 0 ? gst : undefined),
+      qst: useManualTaxes ? qst : (qst && qst > 0 ? qst : undefined),
+      isTaxable: isTaxable || undefined,
+      hasReceipt: hasReceipt || undefined,
+      businessPurpose: (formData.get("businessPurpose") as string) || undefined,
+      deductibleRatio: deductibleRatio < 1.0 ? deductibleRatio : undefined,
+      // ITC (Input Tax Credits)
+      gstItc: formData.get("gstItc") ? parseFloat(formData.get("gstItc") as string) || undefined : undefined,
+      qstItc: formData.get("qstItc") ? parseFloat(formData.get("qstItc") as string) || undefined : undefined,
+    };
+
+    if (updates.amount > 0 && updates.description) {
+      const success = await updateTransaction(editingTransaction.id, updates);
+      if (success) {
+        // Upload des nouveaux documents si présents
+        const fileInput = form.querySelector('input[type="file"][name="documents"]') as HTMLInputElement;
+        if (fileInput && fileInput.files && fileInput.files.length > 0) {
+          const files = Array.from(fileInput.files);
+          const existingDocs = editingTransaction.documents || [];
+          const uploadedDocuments: Document[] = [...existingDocs];
+          
+          setUploadingDocuments(prev => ({ ...prev, [editingTransaction.id]: true }));
+          for (const file of files) {
+            const doc = await uploadTransactionDocument(editingTransaction.id, file);
+            if (doc) {
+              uploadedDocuments.push(doc);
+            }
+          }
+          setUploadingDocuments(prev => ({ ...prev, [editingTransaction.id]: false }));
+          
+          // Mettre à jour la transaction avec les nouveaux documents
+          if (uploadedDocuments.length > existingDocs.length) {
+            await updateTransaction(editingTransaction.id, { documents: uploadedDocuments });
+          }
+        }
+        
+        setShowEditModal(false);
+        setEditingTransaction(null);
+        setShowEditManualTaxes(false);
+        form.reset();
+      } else {
+        alert("Erreur lors de la mise à jour de la transaction. Vérifiez la console pour plus de détails.");
+      }
+    } else {
+      alert("Veuillez remplir tous les champs requis (montant et description).");
+    }
+  };
+  
+  // Fonction pour supprimer un document
+  const handleDeleteDocument = async (transactionId: string, documentUrl: string, documentIndex: number) => {
+    if (!confirm("Êtes-vous sûr de vouloir supprimer ce document ?")) {
+      return;
+    }
+
+    const success = await deleteTransactionDocument(transactionId, documentUrl);
+    if (success) {
+      // Mettre à jour la transaction pour retirer le document
+      const transaction = transactions.find(t => t.id === transactionId);
+      if (transaction && transaction.documents) {
+        const updatedDocuments = transaction.documents.filter((_, idx) => idx !== documentIndex);
+        await updateTransaction(transactionId, { documents: updatedDocuments.length > 0 ? updatedDocuments : undefined });
+      }
+    } else {
+      alert("Erreur lors de la suppression du document.");
+    }
+  };
+
+  // Fonction pour supprimer une transaction
+  const handleDeleteTransaction = async (transactionId: string) => {
+    if (!confirm("Êtes-vous sûr de vouloir supprimer cette transaction ?")) {
+      return;
+    }
+
+    const success = await deleteTransaction(transactionId);
+    if (!success) {
+      alert("Erreur lors de la suppression de la transaction. Vérifiez la console pour plus de détails.");
     }
   };
   
@@ -220,8 +445,8 @@ export default function Transactions() {
           ? t("transactions.income") 
           : t("transactions.expense");
         const amount = transaction.type === "income" 
-          ? `+$${transaction.amount.toFixed(2)}` 
-          : `-$${transaction.amount.toFixed(2)}`;
+          ? `+${transaction.amount.toFixed(2)} $` 
+          : `-${transaction.amount.toFixed(2)} $`;
         
         return [
           transaction.date,
@@ -358,8 +583,8 @@ export default function Transactions() {
                   ? t("transactions.income") 
                   : t("transactions.expense");
                 const amount = transaction.type === "income" 
-                  ? `+$${transaction.amount.toFixed(2)}` 
-                  : `-$${transaction.amount.toFixed(2)}`;
+                  ? `+${transaction.amount.toFixed(2)} $` 
+                  : `-${transaction.amount.toFixed(2)} $`;
                 const amountClass = transaction.type === "income" ? "income" : "expense";
                 
                 return `
@@ -404,8 +629,11 @@ export default function Transactions() {
     }, 250);
   };
   
-  // Générer la liste des années (année fiscale actuelle et 5 années précédentes)
-  const availableYears = Array.from({ length: 6 }, (_, i) => fiscalYear - i);
+
+  // Obtenir les valeurs uniques pour les filtres
+  const uniqueDates = Array.from(new Set(transactions.map(t => t.date))).sort().reverse();
+  const uniqueCompanies = Array.from(new Set(transactions.map(t => t.company).filter(Boolean))).sort();
+  const uniqueCategories = Array.from(new Set(transactions.map(t => t.category).filter(Boolean))).sort();
 
   // Filtrer les transactions par recherche et type
   const filteredTransactions = transactions.filter((t) => {
@@ -413,7 +641,63 @@ export default function Transactions() {
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
     const matchesType = filterType === "all" || t.type === filterType;
-    return matchesSearch && matchesType;
+    const matchesDate = !filterDate || t.date === filterDate;
+    const matchesCompany = !filterCompany || t.company === filterCompany;
+    const matchesCategory = !filterCategory || t.category === filterCategory;
+    const matchesAmount = filterAmount === "all" || 
+      (filterAmount === "income" && t.type === "income") ||
+      (filterAmount === "expense" && t.type === "expense");
+    return matchesSearch && matchesType && matchesDate && matchesCompany && matchesCategory && matchesAmount;
+  });
+
+  // Fonction pour gérer le tri
+  const handleSort = (column: "date" | "company" | "category" | "tags" | "amount") => {
+    if (sortColumn === column) {
+      // Inverser la direction si on clique sur la même colonne
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      // Nouvelle colonne, commencer par ordre décroissant pour le montant, croissant pour les autres
+      setSortColumn(column);
+      setSortDirection(column === "amount" ? "desc" : "asc");
+    }
+  };
+
+  // Trier les transactions
+  const sortedTransactions = [...filteredTransactions].sort((a, b) => {
+    if (!sortColumn) return 0;
+
+    if (sortColumn === "amount") {
+      // Tri numérique pour les montants
+      const comparison = a.amount - b.amount;
+      return sortDirection === "asc" ? comparison : -comparison;
+    }
+
+    let aValue: string;
+    let bValue: string;
+
+    switch (sortColumn) {
+      case "date":
+        aValue = a.date;
+        bValue = b.date;
+        break;
+      case "company":
+        aValue = a.company || "";
+        bValue = b.company || "";
+        break;
+      case "category":
+        aValue = a.category || "";
+        bValue = b.category || "";
+        break;
+      case "tags":
+        aValue = (a.tags || []).join(", ");
+        bValue = (b.tags || []).join(", ");
+        break;
+      default:
+        return 0;
+    }
+
+    const comparison = aValue.localeCompare(bValue);
+    return sortDirection === "asc" ? comparison : -comparison;
   });
 
   const totalIncome = transactions
@@ -436,42 +720,43 @@ export default function Transactions() {
             {t("transactions.subtitle")}
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium"
-        >
-          <Plus className="w-5 h-5" />
-          <span>{t("transactions.addTransaction")}</span>
-        </button>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <p className="text-sm text-muted-foreground mb-2">{t("transactions.totalIncome")}</p>
-          <p className="text-3xl font-bold text-success">
-            ${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-          </p>
-        </div>
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <p className="text-sm text-muted-foreground mb-2">{t("transactions.totalExpenses")}</p>
-          <p className="text-3xl font-bold text-destructive">
-            ${totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-          </p>
-        </div>
-        <div className="bg-card rounded-lg border border-border p-6 shadow-sm">
-          <p className="text-sm text-muted-foreground mb-2">{t("transactions.net")}</p>
-          <p
-            className={`text-3xl font-bold ${
-              totalIncome - totalExpenses >= 0
-                ? "text-success"
-                : "text-destructive"
-            }`}
+        <div className="flex items-center gap-3">
+          {/* Summary Cards */}
+          <div className="flex items-center gap-2">
+            <div className="bg-card rounded-md border border-border px-3 py-1.5 shadow-sm">
+              <p className="text-[10px] text-muted-foreground mb-0.5">{t("transactions.totalIncome")}</p>
+              <p className="text-sm font-bold text-success">
+                {totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $
+              </p>
+            </div>
+            <div className="bg-card rounded-md border border-border px-3 py-1.5 shadow-sm">
+              <p className="text-[10px] text-muted-foreground mb-0.5">{t("transactions.totalExpenses")}</p>
+              <p className="text-sm font-bold text-destructive">
+                {totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })} $
+              </p>
+            </div>
+            <div className="bg-card rounded-md border border-border px-3 py-1.5 shadow-sm">
+              <p className="text-[10px] text-muted-foreground mb-0.5">{t("transactions.net")}</p>
+              <p
+                className={`text-sm font-bold ${
+                  totalIncome - totalExpenses >= 0
+                    ? "text-success"
+                    : "text-destructive"
+                }`}
+              >
+                {(totalIncome - totalExpenses).toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                })} $
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium"
           >
-            ${(totalIncome - totalExpenses).toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-            })}
-          </p>
+            <Plus className="w-5 h-5" />
+            <span>{t("transactions.addTransaction")}</span>
+          </button>
         </div>
       </div>
 
@@ -480,6 +765,8 @@ export default function Transactions() {
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-3 w-5 h-5 text-muted-foreground" />
           <input
+            id="transaction-search"
+            name="search"
             type="text"
             placeholder={t("transactions.searchPlaceholder")}
             value={searchTerm}
@@ -487,26 +774,15 @@ export default function Transactions() {
             className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
-        <div className="flex items-center gap-3 bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl px-4 py-2.5">
-          <Calendar className="w-5 h-5 text-muted-foreground" />
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
-            className="bg-transparent border-none text-foreground font-medium focus:outline-none cursor-pointer"
-          >
-            {availableYears.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
-        </div>
         <div className="flex items-center gap-2">
           <Filter className="w-5 h-5 text-muted-foreground" />
           <select
+            id="transaction-filter-type"
+            name="filterType"
             value={filterType}
             onChange={(e) => setFilterType(e.target.value as any)}
             className="px-3 py-2 border border-border rounded-lg bg-card text-foreground hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary"
+            aria-label="Filtrer par type de transaction"
           >
             <option value="all">{t("transactions.allTransactions")}</option>
             <option value="income">{t("transactions.incomeOnly")}</option>
@@ -538,22 +814,215 @@ export default function Transactions() {
             <thead>
               <tr className="border-b border-border bg-secondary/50">
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
-                  {t("transactions.date")}
+                  <div className="relative flex items-center gap-2">
+                    <button
+                      onClick={() => handleSort("date")}
+                      className="flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {sortColumn === "date" ? (
+                        sortDirection === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-50" />
+                      )}
+                      {t("transactions.date")}
+                    </button>
+                    <button
+                      onClick={() => setShowDateFilter(!showDateFilter)}
+                      className="p-1 hover:bg-secondary rounded transition-colors"
+                      aria-label="Filtrer par date"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showDateFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showDateFilter && (
+                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[200px] max-h-[300px] overflow-y-auto">
+                        <div className="p-2">
+                          <button
+                            onClick={() => { setFilterDate(null); setShowDateFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${!filterDate ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            Toutes les dates
+                          </button>
+                          {uniqueDates.map((date) => (
+                            <button
+                              key={date}
+                              onClick={() => { setFilterDate(date); setShowDateFilter(false); }}
+                              className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterDate === date ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                            >
+                              {date}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
                   {t("transactions.description")}
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
-                  {t("transactions.category")}
+                  <div className="relative flex items-center gap-2">
+                    <button
+                      onClick={() => handleSort("category")}
+                      className="flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {sortColumn === "category" ? (
+                        sortDirection === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-50" />
+                      )}
+                      {t("transactions.category")}
+                    </button>
+                    <button
+                      onClick={() => setShowCategoryFilter(!showCategoryFilter)}
+                      className="p-1 hover:bg-secondary rounded transition-colors"
+                      aria-label="Filtrer par catégorie"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showCategoryFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCategoryFilter && (
+                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[200px] max-h-[300px] overflow-y-auto">
+                        <div className="p-2">
+                          <button
+                            onClick={() => { setFilterCategory(null); setShowCategoryFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${!filterCategory ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            Toutes les catégories
+                          </button>
+                          {uniqueCategories.map((category) => (
+                            <button
+                              key={category}
+                              onClick={() => { setFilterCategory(category); setShowCategoryFilter(false); }}
+                              className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterCategory === category ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                            >
+                              {category}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
-                  {t("transactions.company")}
+                  <div className="relative flex items-center gap-2">
+                    <button
+                      onClick={() => handleSort("company")}
+                      className="flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {sortColumn === "company" ? (
+                        sortDirection === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-50" />
+                      )}
+                      {t("transactions.company")}
+                    </button>
+                    <button
+                      onClick={() => setShowCompanyFilter(!showCompanyFilter)}
+                      className="p-1 hover:bg-secondary rounded transition-colors"
+                      aria-label="Filtrer par entreprise"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showCompanyFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCompanyFilter && (
+                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[200px] max-h-[300px] overflow-y-auto">
+                        <div className="p-2">
+                          <button
+                            onClick={() => { setFilterCompany(null); setShowCompanyFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${!filterCompany ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            Toutes les entreprises
+                          </button>
+                          {uniqueCompanies.map((company) => (
+                            <button
+                              key={company}
+                              onClick={() => { setFilterCompany(company); setShowCompanyFilter(false); }}
+                              className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterCompany === company ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                            >
+                              {company}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
-                  {t("transactions.tags")}
+                  <button
+                    onClick={() => handleSort("tags")}
+                    className="flex items-center gap-1 hover:text-primary transition-colors"
+                  >
+                    {t("transactions.tags")}
+                    {sortColumn === "tags" ? (
+                      sortDirection === "asc" ? (
+                        <ArrowUp className="w-3 h-3" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-50" />
+                    )}
+                  </button>
                 </th>
                 <th className="text-right py-3 px-4 text-sm font-semibold text-foreground">
-                  {t("transactions.amount")}
+                  <div className="relative flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => handleSort("amount")}
+                      className="flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {sortColumn === "amount" ? (
+                        sortDirection === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-50" />
+                      )}
+                      {t("transactions.amount")}
+                    </button>
+                    <button
+                      onClick={() => setShowAmountFilter(!showAmountFilter)}
+                      className="p-1 hover:bg-secondary rounded transition-colors"
+                      aria-label="Filtrer par type"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showAmountFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showAmountFilter && (
+                      <div className="absolute top-full right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[180px]">
+                        <div className="p-2">
+                          <button
+                            onClick={() => { setFilterAmount("all"); setShowAmountFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "all" ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            Tous (Revenus + Dépenses)
+                          </button>
+                          <button
+                            onClick={() => { setFilterAmount("income"); setShowAmountFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "income" ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            Revenus seulement
+                          </button>
+                          <button
+                            onClick={() => { setFilterAmount("expense"); setShowAmountFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "expense" ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            Dépenses seulement
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-semibold text-foreground">
                   {t("transactions.actions")}
@@ -561,8 +1030,14 @@ export default function Transactions() {
               </tr>
             </thead>
             <tbody>
-              {filteredTransactions.length > 0 ? (
-                filteredTransactions.map((transaction) => (
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="py-8 px-4 text-center text-muted-foreground">
+                    Chargement des transactions...
+                  </td>
+                </tr>
+                      ) : sortedTransactions.length > 0 ? (
+                        sortedTransactions.map((transaction) => (
                 <tr
                   key={transaction.id}
                   className="border-b border-border hover:bg-secondary/50 transition-colors"
@@ -571,17 +1046,25 @@ export default function Transactions() {
                     {transaction.date}
                   </td>
                   <td className="py-3 px-4 text-sm text-foreground">
-                    {transaction.description}
+                    <div className="flex items-center gap-2">
+                      <span>{transaction.description}</span>
+                      {transaction.documents && transaction.documents.length > 0 && (
+                        <span className="flex items-center gap-1 text-xs text-primary" title={`${transaction.documents.length} document(s) joint(s)`}>
+                          <Paperclip className="w-3 h-3" />
+                          <span>{transaction.documents.length}</span>
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-sm text-muted-foreground">
                     {transaction.category}
                   </td>
                   <td className="py-3 px-4 text-sm text-muted-foreground">
-                    {transaction.company}
+                    {transaction.company || "-"}
                   </td>
                   <td className="py-3 px-4 text-sm">
                     <div className="flex flex-wrap gap-1">
-                      {transaction.tags.map((tag, idx) => (
+                      {(transaction.tags || []).map((tag, idx) => (
                         <span
                           key={idx}
                           className="px-2 py-1 bg-primary/10 text-primary text-xs rounded font-medium"
@@ -598,17 +1081,25 @@ export default function Transactions() {
                         : "text-destructive"
                     }`}
                   >
-                    {transaction.type === "income" ? "+" : "-"}$
+                    {transaction.type === "income" ? "+" : "-"}
                     {transaction.amount.toLocaleString("en-US", {
                       minimumFractionDigits: 2,
-                    })}
+                    })} $
                   </td>
                   <td className="py-3 px-4 text-center">
                     <div className="flex items-center justify-center gap-2">
-                      <button className="p-1 hover:bg-secondary rounded transition-colors">
+                      <button 
+                        onClick={() => handleEditTransaction(transaction)}
+                        className="p-1 hover:bg-secondary rounded transition-colors"
+                        aria-label="Modifier la transaction"
+                      >
                         <Edit2 className="w-4 h-4 text-foreground" />
                       </button>
-                      <button className="p-1 hover:bg-destructive/10 rounded transition-colors">
+                      <button 
+                        onClick={() => handleDeleteTransaction(transaction.id)}
+                        className="p-1 hover:bg-destructive/10 rounded transition-colors"
+                        aria-label="Supprimer la transaction"
+                      >
                         <Trash2 className="w-4 h-4 text-destructive" />
                       </button>
                     </div>
@@ -629,64 +1120,135 @@ export default function Transactions() {
 
       {/* Add Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-lg border border-border p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold text-foreground mb-6">
-              {t("transactions.addTransactionTitle")}
-            </h2>
-            <form className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
-                  {t("transactions.date")}
-                </label>
-                <input
-                  type="date"
-                  name="date"
-                  defaultValue={new Date().toISOString().split('T')[0]}
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  required
-                />
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-xl border border-border shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Plus className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">
+                    {t("transactions.addTransactionTitle")}
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Ajoutez une nouvelle transaction financière
+                  </p>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
-                  {t("transactions.type")}
-                </label>
-                <select name="type" className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary" required>
-                  <option value="income">{t("transactions.income")}</option>
-                  <option value="expense">{t("transactions.expense")}</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
-                  {t("transactions.description")}
-                </label>
-                <input
-                  type="text"
-                  name="description"
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder={t("transactions.descriptionPlaceholder")}
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-foreground block mb-2">
-                  {t("transactions.amount")}
-                </label>
-                <input
-                  type="number"
-                  name="amount"
-                  step="0.01"
-                  min="0.01"
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder={t("transactions.amountPlaceholder")}
-                  required
-                />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium text-foreground">
-                  {t("transactions.category")}
-                </label>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                aria-label="Fermer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleAddTransaction} className="p-6 space-y-6">
+              {/* Section: Informations principales */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+                    Informations principales
+                  </h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="transaction-date" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.date")} <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="transaction-date"
+                      type="date"
+                      name="date"
+                      defaultValue={new Date().toISOString().split('T')[0]}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="transaction-type" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.type")} <span className="text-destructive">*</span>
+                    </label>
+                    <select 
+                      id="transaction-type" 
+                      name="type" 
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all" 
+                      required
+                    >
+                      <option value="income">{t("transactions.income")}</option>
+                      <option value="expense">{t("transactions.expense")}</option>
+                    </select>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <label htmlFor="transaction-description" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.description")} <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="transaction-description"
+                      type="text"
+                      name="description"
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
+                      placeholder={t("transactions.descriptionPlaceholder")}
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="transaction-amount" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <DollarSign className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.amount")} <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="transaction-amount"
+                      type="number"
+                      name="amount"
+                      step="0.01"
+                      min="0.01"
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="transaction-company" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.company")} <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                    </label>
+                    <select 
+                      id="transaction-company" 
+                      name="company" 
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                    >
+                      {companies.length > 0 ? (
+                        companies.map((company) => (
+                          <option key={company.id} value={company.name}>
+                            {company.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Aucune entreprise</option>
+                      )}
+                    </select>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <label htmlFor="transaction-category" className="text-sm font-medium text-foreground flex items-center gap-2">
+                        <Tag className="w-4 h-4 text-muted-foreground" />
+                        {t("transactions.category")} <span className="text-destructive">*</span>
+                      </label>
                   {!showAddCategory && (
                     <button
                       type="button"
@@ -701,6 +1263,8 @@ export default function Transactions() {
                 {showAddCategory ? (
                   <div className="flex gap-2">
                     <input
+                      id="new-category-input"
+                      name="newCategory"
                       type="text"
                       value={newCategory}
                       onChange={(e) => setNewCategory(e.target.value)}
@@ -712,6 +1276,7 @@ export default function Transactions() {
                       type="button"
                       onClick={addCustomCategory}
                       className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
+                      aria-label="Ajouter la catégorie"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -722,32 +1287,199 @@ export default function Transactions() {
                         setNewCategory("");
                       }}
                       className="px-3 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors"
+                      aria-label="Annuler l'ajout de catégorie"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
                 ) : (
-                  <select name="category" className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary" required>
+                  <select id="transaction-category" name="category" className="w-full px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary" required>
                     {allCategories.map((category) => (
                       <option key={category} value={category}>
                         {category}
                       </option>
                     ))}
                 </select>
-                )}
-              </div>
-              <div className="flex gap-3 pt-4">
+                        )}
+                      </div>
+                        </div>
+                      </div>
+
+                      {/* Section: Informations fiscales */}
+                      <div className="space-y-4 pt-4 border-t border-border">
+                        <div className="flex items-center gap-2 mb-4">
+                          <FileText className="w-4 h-4 text-muted-foreground" />
+                          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+                            Informations fiscales
+                          </h3>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                              <input
+                                type="checkbox"
+                                name="isTaxable"
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <span>Transaction taxable (GST/QST applicable)</span>
+                            </label>
+                          </div>
+                          
+                          <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                              <input
+                                type="checkbox"
+                                name="hasReceipt"
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <span>Reçu disponible</span>
+                            </label>
+                          </div>
+                          
+                          <div className="md:col-span-2">
+                            <label htmlFor="transaction-business-purpose" className="text-sm font-medium text-foreground block mb-2">
+                              Objectif commercial <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                            </label>
+                            <textarea
+                              id="transaction-business-purpose"
+                              name="businessPurpose"
+                              rows={2}
+                              className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
+                              placeholder="Décrivez l'objectif commercial de cette transaction"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label htmlFor="transaction-gst-itc" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                              <DollarSign className="w-4 h-4 text-muted-foreground" />
+                              ITC GST <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                            </label>
+                            <input
+                              id="transaction-gst-itc"
+                              type="number"
+                              name="gstItc"
+                              step="0.01"
+                              min="0"
+                              className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                              placeholder="0.00"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Crédit de taxe sur les intrants GST
+                            </p>
+                          </div>
+                          
+                          <div>
+                            <label htmlFor="transaction-qst-itc" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                              <DollarSign className="w-4 h-4 text-muted-foreground" />
+                              ITC QST <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                            </label>
+                            <input
+                              id="transaction-qst-itc"
+                              type="number"
+                              name="qstItc"
+                              step="0.01"
+                              min="0"
+                              className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                              placeholder="0.00"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Crédit de taxe sur les intrants QST
+                            </p>
+                          </div>
+                          
+                          <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-3">
+                              <input
+                                type="checkbox"
+                                name="useManualTaxes"
+                                id="use-manual-taxes"
+                                checked={showManualTaxes}
+                                onChange={(e) => setShowManualTaxes(e.target.checked)}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <span>Utiliser des montants de taxes manuels</span>
+                            </label>
+                            
+                            <div id="manual-taxes-fields" className={`grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 ${showManualTaxes ? '' : 'hidden'}`}>
+                              <div>
+                                <label htmlFor="transaction-manual-gst" className="text-sm font-medium text-foreground block mb-2">
+                                  GST (montant manuel) <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                                </label>
+                                <input
+                                  id="transaction-manual-gst"
+                                  type="number"
+                                  name="manualGst"
+                                  step="0.01"
+                                  min="0"
+                                  className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              
+                              <div>
+                                <label htmlFor="transaction-manual-qst" className="text-sm font-medium text-foreground block mb-2">
+                                  QST (montant manuel) <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                                </label>
+                                <input
+                                  id="transaction-manual-qst"
+                                  type="number"
+                                  name="manualQst"
+                                  step="0.01"
+                                  min="0"
+                                  className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section: Documents */}
+                      <div className="space-y-4 pt-4 border-t border-border">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Paperclip className="w-4 h-4 text-muted-foreground" />
+                          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+                            Documents joints
+                          </h3>
+                        </div>
+                        
+                        <div>
+                          <label htmlFor="transaction-documents" className="text-sm font-medium text-foreground block mb-2">
+                            Ajouter des documents <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                          </label>
+                          <input
+                            id="transaction-documents"
+                            type="file"
+                            name="documents"
+                            multiple
+                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                            className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                          />
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Formats acceptés: PDF, images (JPG, PNG), documents (DOC, DOCX, XLS, XLSX)
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="flex gap-3 pt-4 border-t border-border">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setShowManualTaxes(false);
+                  }}
+                  className="flex-1 px-4 py-2.5 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
                 >
                   {t("companies.cancel")}
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium"
+                  className="flex-1 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium flex items-center justify-center gap-2"
                 >
+                  <Plus className="w-4 h-4" />
                   {t("transactions.addTransaction")}
                 </button>
               </div>
@@ -755,6 +1487,323 @@ export default function Transactions() {
           </div>
         </div>
       )}
-    </MainLayout>
-  );
-}
+
+      {/* Edit Modal */}
+      {showEditModal && editingTransaction && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-xl border border-border shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Edit2 className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">
+                    Modifier la transaction
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Modifiez les informations de la transaction
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingTransaction(null);
+                }}
+                className="p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+                aria-label="Fermer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleUpdateTransaction} className="p-6 space-y-6">
+              {/* Section: Informations principales */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+                    Informations principales
+                  </h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="edit-transaction-date" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.date")} <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="edit-transaction-date"
+                      type="date"
+                      name="date"
+                      defaultValue={editingTransaction.date}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="edit-transaction-type" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.type")} <span className="text-destructive">*</span>
+                    </label>
+                    <select 
+                      id="edit-transaction-type" 
+                      name="type" 
+                      defaultValue={editingTransaction.type}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all" 
+                      required
+                    >
+                      <option value="income">{t("transactions.income")}</option>
+                      <option value="expense">{t("transactions.expense")}</option>
+                    </select>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <label htmlFor="edit-transaction-description" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.description")} <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="edit-transaction-description"
+                      type="text"
+                      name="description"
+                      defaultValue={editingTransaction.description || ""}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
+                      placeholder={t("transactions.descriptionPlaceholder")}
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="edit-transaction-amount" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <DollarSign className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.amount")} <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      id="edit-transaction-amount"
+                      type="number"
+                      name="amount"
+                      step="0.01"
+                      min="0.01"
+                      defaultValue={editingTransaction.amount}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="edit-transaction-company" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.company")} <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                    </label>
+                    <select 
+                      id="edit-transaction-company" 
+                      name="company" 
+                      defaultValue={editingTransaction.company || ""}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                    >
+                      {companies.length > 0 ? (
+                        companies.map((company) => (
+                          <option key={company.id} value={company.name}>
+                            {company.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Aucune entreprise</option>
+                      )}
+                    </select>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <label htmlFor="edit-transaction-category" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-muted-foreground" />
+                      {t("transactions.category")} <span className="text-destructive">*</span>
+                    </label>
+                    <select 
+                      id="edit-transaction-category" 
+                      name="category" 
+                      defaultValue={editingTransaction.category || ""}
+                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all" 
+                      required
+                    >
+                      {allCategories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Section: Informations fiscales */}
+                      <div className="space-y-4 pt-4 border-t border-border">
+                        <div className="flex items-center gap-2 mb-4">
+                          <FileText className="w-4 h-4 text-muted-foreground" />
+                          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
+                            Informations fiscales
+                          </h3>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                              <input
+                                type="checkbox"
+                                name="isTaxable"
+                                defaultChecked={editingTransaction.isTaxable || false}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <span>Transaction taxable (GST/QST applicable)</span>
+                            </label>
+                          </div>
+                          
+                          <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                              <input
+                                type="checkbox"
+                                name="hasReceipt"
+                                defaultChecked={editingTransaction.hasReceipt || false}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <span>Reçu disponible</span>
+                            </label>
+                          </div>
+                          
+                          <div className="md:col-span-2">
+                            <label htmlFor="edit-transaction-business-purpose" className="text-sm font-medium text-foreground block mb-2">
+                              Objectif commercial <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                            </label>
+                            <textarea
+                              id="edit-transaction-business-purpose"
+                              name="businessPurpose"
+                              rows={2}
+                              defaultValue={editingTransaction.businessPurpose || ""}
+                              className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
+                              placeholder="Décrivez l'objectif commercial de cette transaction"
+                            />
+                          </div>
+                          
+                          <div>
+                            <label htmlFor="edit-transaction-gst-itc" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                              <DollarSign className="w-4 h-4 text-muted-foreground" />
+                              ITC GST <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                            </label>
+                            <input
+                              id="edit-transaction-gst-itc"
+                              type="number"
+                              name="gstItc"
+                              step="0.01"
+                              min="0"
+                              defaultValue={editingTransaction.gstItc || ""}
+                              className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                              placeholder="0.00"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Crédit de taxe sur les intrants GST
+                            </p>
+                          </div>
+                          
+                          <div>
+                            <label htmlFor="edit-transaction-qst-itc" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                              <DollarSign className="w-4 h-4 text-muted-foreground" />
+                              ITC QST <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                            </label>
+                            <input
+                              id="edit-transaction-qst-itc"
+                              type="number"
+                              name="qstItc"
+                              step="0.01"
+                              min="0"
+                              defaultValue={editingTransaction.qstItc || ""}
+                              className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                              placeholder="0.00"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Crédit de taxe sur les intrants QST
+                            </p>
+                          </div>
+                          
+                          <div className="md:col-span-2">
+                            <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-3">
+                              <input
+                                type="checkbox"
+                                name="useManualTaxes"
+                                id="edit-use-manual-taxes"
+                                checked={showEditManualTaxes}
+                                onChange={(e) => setShowEditManualTaxes(e.target.checked)}
+                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                              />
+                              <span>Utiliser des montants de taxes manuels</span>
+                            </label>
+                            
+                            <div id="edit-manual-taxes-fields" className={`grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 ${showEditManualTaxes ? '' : 'hidden'}`}>
+                              <div>
+                                <label htmlFor="edit-transaction-manual-gst" className="text-sm font-medium text-foreground block mb-2">
+                                  GST (montant manuel) <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                                </label>
+                                <input
+                                  id="edit-transaction-manual-gst"
+                                  type="number"
+                                  name="manualGst"
+                                  step="0.01"
+                                  min="0"
+                                  defaultValue={editingTransaction.gst || ""}
+                                  className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              
+                              <div>
+                                <label htmlFor="edit-transaction-manual-qst" className="text-sm font-medium text-foreground block mb-2">
+                                  QST (montant manuel) <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                                </label>
+                                <input
+                                  id="edit-transaction-manual-qst"
+                                  type="number"
+                                  name="manualQst"
+                                  step="0.01"
+                                  min="0"
+                                  defaultValue={editingTransaction.qst || ""}
+                                  className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60 font-mono"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="flex gap-3 pt-4 border-t border-border">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowEditModal(false);
+                            setEditingTransaction(null);
+                          }}
+                          className="flex-1 px-4 py-2.5 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="submit"
+                          className="flex-1 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium flex items-center justify-center gap-2"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          Enregistrer
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </MainLayout>
+          );
+        }

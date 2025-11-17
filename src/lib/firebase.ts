@@ -1,7 +1,9 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getAnalytics, type Analytics } from "firebase/analytics";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFirestore, type Firestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { getAuth, type Auth } from "firebase/auth";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 // Debug: Log all VITE_ env vars
 if (import.meta.env.DEV) {
@@ -62,6 +64,8 @@ if (missingVars.length > 0) {
 let app: FirebaseApp | undefined;
 let analytics: Analytics | null = null;
 let db: Firestore | undefined;
+let auth: Auth | undefined;
+let storage: FirebaseStorage | undefined;
 
 // Vérifier que toutes les valeurs requises sont présentes
 const hasAllRequiredValues = 
@@ -80,8 +84,32 @@ if (hasAllRequiredValues) {
     if (app) {
       try {
         db = getFirestore(app);
-      } catch (firestoreError) {
-        console.warn("⚠️ Firestore n'a pas pu être initialisé:", firestoreError);
+        console.log("✅ Firestore initialisé avec succès");
+        
+        // Activer la persistance hors ligne (uniquement dans le navigateur)
+        if (typeof window !== "undefined") {
+          enableIndexedDbPersistence(db).catch((err: any) => {
+            if (err.code === 'failed-precondition') {
+              console.warn("⚠️ Persistance Firestore: plusieurs onglets ouverts, seule la persistance est activée dans un seul onglet");
+            } else if (err.code === 'unimplemented') {
+              console.warn("⚠️ Persistance Firestore: le navigateur ne supporte pas toutes les fonctionnalités requises");
+            } else {
+              console.warn("⚠️ Persistance Firestore non activée:", err);
+            }
+          });
+        }
+      } catch (firestoreError: any) {
+        console.error("❌ Firestore n'a pas pu être initialisé:", firestoreError);
+        console.error("Code d'erreur:", firestoreError?.code);
+        console.error("Message:", firestoreError?.message);
+      }
+      
+      // Initialize Auth
+      try {
+        auth = getAuth(app);
+        console.log("✅ Firebase Auth initialisé avec succès");
+      } catch (authError) {
+        console.error("❌ Auth n'a pas pu être initialisé:", authError);
       }
     }
     
@@ -102,5 +130,5 @@ if (hasAllRequiredValues) {
   );
 }
 
-export { app, analytics, db };
+export { app, analytics, db, auth, storage };
 

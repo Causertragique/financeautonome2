@@ -48,6 +48,11 @@ const translations = {
     "dashboard.monthMay": "Mai",
     "dashboard.monthJun": "Jun",
     "dashboard.monthJul": "Jul",
+    "dashboard.monthAug": "Aoû",
+    "dashboard.monthSep": "Sep",
+    "dashboard.monthOct": "Oct",
+    "dashboard.monthNov": "Nov",
+    "dashboard.monthDec": "Déc",
     
     // Dashboard - Expense Categories
     "dashboard.categorySalaries": "Salaires",
@@ -87,10 +92,12 @@ const translations = {
     "sidebar.accounting": "Comptabilité",
     "sidebar.taxFiling": "Déclaration fiscale",
     "sidebar.reports": "Rapports",
+    "sidebar.anomalies": "Anomalies",
+    "sidebar.assets": "Actifs",
     "sidebar.settings": "Paramètres",
-    "sidebar.brand": "FinTrack",
+    "sidebar.brand": "NovaFinance",
     "sidebar.tagline": "Gestion Financière",
-    "sidebar.footer": "© 2024 FinTrack",
+    "sidebar.footer": "© 2024 NovaFinance",
     "sidebar.footerTagline": "La finance simplifiée ✨",
     
     // Header
@@ -175,6 +182,9 @@ const translations = {
     "companies.neqPlaceholder": "1234 5678 90",
     "companies.cancel": "Annuler",
     "companies.createCompany": "Créer l'entreprise",
+    "companies.moreOptions": "Plus d'options",
+    "companies.editCompany": "Modifier l'entreprise",
+    "companies.deleteCompany": "Supprimer l'entreprise",
     
     // Transactions
     "transactions.title": "Dépenses et Revenus",
@@ -301,6 +311,11 @@ const translations = {
     "dashboard.monthMay": "May",
     "dashboard.monthJun": "Jun",
     "dashboard.monthJul": "Jul",
+    "dashboard.monthAug": "Aug",
+    "dashboard.monthSep": "Sep",
+    "dashboard.monthOct": "Oct",
+    "dashboard.monthNov": "Nov",
+    "dashboard.monthDec": "Dec",
     
     // Dashboard - Expense Categories
     "dashboard.categorySalaries": "Salaries",
@@ -340,10 +355,12 @@ const translations = {
     "sidebar.accounting": "Accounting",
     "sidebar.taxFiling": "Tax Filing",
     "sidebar.reports": "Reports",
+    "sidebar.anomalies": "Anomalies",
+    "sidebar.assets": "Assets",
     "sidebar.settings": "Settings",
-    "sidebar.brand": "FinTrack",
+    "sidebar.brand": "NovaFinance",
     "sidebar.tagline": "Financial Management",
-    "sidebar.footer": "© 2024 FinTrack",
+    "sidebar.footer": "© 2024 NovaFinance",
     "sidebar.footerTagline": "Accounting Made Simple ✨",
     
     // Header
@@ -428,6 +445,9 @@ const translations = {
     "companies.neqPlaceholder": "1234 5678 90",
     "companies.cancel": "Cancel",
     "companies.createCompany": "Create Company",
+    "companies.moreOptions": "More options",
+    "companies.editCompany": "Edit company",
+    "companies.deleteCompany": "Delete company",
     
     // Transactions
     "transactions.title": "Expenses & Income",
@@ -531,7 +551,39 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   };
 
   const t = (key: string): string => {
-    return translations[language][key as keyof typeof translations.fr] || key;
+    const translation = translations[language][key as keyof typeof translations.fr];
+    if (translation) {
+      return translation;
+    }
+    // Si la traduction n'existe pas, essayer de formater la clé de manière lisible
+    // au lieu d'afficher "dashboard.monthAug", afficher "Août" par exemple
+    if (key.includes("month")) {
+      const monthMap: { [key: string]: string } = {
+        "monthJan": language === "fr" ? "Jan" : "Jan",
+        "monthFeb": language === "fr" ? "Fév" : "Feb",
+        "monthMar": language === "fr" ? "Mar" : "Mar",
+        "monthApr": language === "fr" ? "Avr" : "Apr",
+        "monthMay": language === "fr" ? "Mai" : "May",
+        "monthJun": language === "fr" ? "Jun" : "Jun",
+        "monthJul": language === "fr" ? "Jul" : "Jul",
+        "monthAug": language === "fr" ? "Aoû" : "Aug",
+        "monthSep": language === "fr" ? "Sep" : "Sep",
+        "monthOct": language === "fr" ? "Oct" : "Oct",
+        "monthNov": language === "fr" ? "Nov" : "Nov",
+        "monthDec": language === "fr" ? "Déc" : "Dec",
+      };
+      const monthKey = key.split(".").pop() || "";
+      if (monthMap[monthKey]) {
+        return monthMap[monthKey];
+      }
+    }
+    // Pour les autres clés manquantes, retourner un message d'erreur en mode dev, ou la clé formatée
+    if (import.meta.env.DEV) {
+      console.warn(`Traduction manquante pour la clé: ${key}`);
+    }
+    // Retourner la dernière partie de la clé (après le dernier point) formatée
+    const lastPart = key.split(".").pop() || key;
+    return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/([A-Z])/g, " $1");
   };
 
   return (

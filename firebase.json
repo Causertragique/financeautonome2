@@ -1,9 +1,12 @@
 {
   "firestore": {
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
   },
   "hosting": {
+    "site": "autonomev2-477910-15f42",
     "public": "public",
     "ignore": [
       "firebase.json",
