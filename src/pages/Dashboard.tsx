@@ -4,7 +4,14 @@ import MainLayout from "../layouts/MainLayout";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useFiscalYearContext } from "../contexts/FiscalYearContext";
-import { getTransactions, type Transaction } from "../lib/db";
+import { useUsageMode } from "../contexts/UsageModeContext";
+import { 
+  getTransactions, 
+  type Transaction,
+  getVehicleAnnualProfiles,
+  getHomeOfficeExpenses,
+  getTechExpenses,
+} from "../lib/db";
 import {
   LineChart,
   Line,
@@ -33,50 +40,103 @@ export default function Dashboard() {
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { selectedYear } = useFiscalYearContext();
+  const { currentMode, usageType } = useUsageMode();
   const [selectedPeriod, setSelectedPeriod] = useState("ytd");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [vehicleExpenses, setVehicleExpenses] = useState<any[]>([]);
+  const [homeOfficeExpenses, setHomeOfficeExpenses] = useState<any[]>([]);
+  const [techExpenses, setTechExpenses] = useState<any[]>([]);
   
   // Les données mock sont uniquement pour la démo quand l'utilisateur n'est pas connecté
   // Si l'utilisateur est connecté, on utilise les vraies données depuis Firestore
   const shouldShowMockData = !currentUser;
 
-  // Charger les transactions depuis la base de données
+  // Charger les transactions et toutes les dépenses depuis la base de données
   React.useEffect(() => {
-    const loadTransactions = async () => {
+    const loadAllData = async () => {
       if (!currentUser) {
         setTransactions([]);
+        setVehicleExpenses([]);
+        setHomeOfficeExpenses([]);
+        setTechExpenses([]);
         return;
       }
       try {
-        const data = await getTransactions(selectedYear);
-        setTransactions(data);
+        // Déterminer le mode à utiliser (si usageType est "both", utiliser currentMode, sinon utiliser usageType)
+        const mode = usageType === "both" ? currentMode : (usageType || "business");
+        
+        const [transactionsData, vehicleData, homeOfficeData, techData] = await Promise.all([
+          getTransactions(selectedYear, mode),
+          getVehicleAnnualProfiles(selectedYear, mode),
+          getHomeOfficeExpenses(selectedYear, mode),
+          getTechExpenses(selectedYear, mode),
+        ]);
+        setTransactions(transactionsData);
+        setVehicleExpenses(vehicleData);
+        setHomeOfficeExpenses(homeOfficeData);
+        setTechExpenses(techData);
       } catch (error) {
-        console.error("Erreur lors du chargement des transactions:", error);
+        console.error("Erreur lors du chargement des données:", error);
         setTransactions([]);
+        setVehicleExpenses([]);
+        setHomeOfficeExpenses([]);
+        setTechExpenses([]);
       }
     };
 
-    loadTransactions();
+    loadAllData();
     
     // Écouter les événements personnalisés pour les changements
-    const handleUpdate = () => {
-      loadTransactions();
+    const handleTransactionsUpdate = () => {
+      loadAllData();
     };
-    window.addEventListener("transactionsUpdated", handleUpdate);
+    const handleVehicleExpensesUpdate = () => {
+      loadAllData();
+    };
+    const handleHomeOfficeExpensesUpdate = () => {
+      loadAllData();
+    };
+    const handleTechExpensesUpdate = () => {
+      loadAllData();
+    };
+    
+    window.addEventListener("transactionsUpdated", handleTransactionsUpdate);
+    window.addEventListener("vehicleExpensesUpdated", handleVehicleExpensesUpdate);
+    window.addEventListener("homeOfficeExpensesUpdated", handleHomeOfficeExpensesUpdate);
+    window.addEventListener("techExpensesUpdated", handleTechExpensesUpdate);
 
     return () => {
-      window.removeEventListener("transactionsUpdated", handleUpdate);
+      window.removeEventListener("transactionsUpdated", handleTransactionsUpdate);
+      window.removeEventListener("vehicleExpensesUpdated", handleVehicleExpensesUpdate);
+      window.removeEventListener("homeOfficeExpensesUpdated", handleHomeOfficeExpensesUpdate);
+      window.removeEventListener("techExpensesUpdated", handleTechExpensesUpdate);
     };
-  }, [selectedYear, currentUser]);
+  }, [selectedYear, currentUser, currentMode, usageType]);
 
-  // Calculer les statistiques réelles à partir des transactions
+  // Calculer les statistiques réelles à partir des transactions et des dépenses spéciales
   const totalIncome = transactions
     .filter((t) => t.type === "income")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalExpenses = transactions
+  // Dépenses des transactions
+  const transactionExpenses = transactions
     .filter((t) => t.type === "expense")
     .reduce((sum, t) => sum + t.amount, 0);
+
+  // Dépenses véhicule (deductibleTotal est déjà calculé et enregistré dans la DB)
+  const vehicleExpensesTotal = vehicleExpenses
+    .reduce((sum, ve) => sum + (ve.deductibleTotal || 0), 0);
+
+  // Dépenses bureau à domicile (totalExpenses est déjà calculé et enregistré dans la DB)
+  const homeOfficeExpensesTotal = homeOfficeExpenses
+    .reduce((sum, ho) => sum + (ho.totalExpenses || 0), 0);
+
+  // Dépenses techno (totalExpenses est déjà calculé et enregistré dans la DB)
+  const techExpensesTotal = techExpenses
+    .reduce((sum, te) => sum + (te.totalExpenses || 0), 0);
+
+  // Total de toutes les dépenses
+  const totalExpenses = transactionExpenses + vehicleExpensesTotal + homeOfficeExpensesTotal + techExpensesTotal;
 
   const netIncome = totalIncome - totalExpenses;
   const margin = totalIncome > 0 ? ((netIncome / totalIncome) * 100).toFixed(1) : "0";

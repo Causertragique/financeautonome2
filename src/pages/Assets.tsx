@@ -51,8 +51,9 @@ export default function Assets() {
         setCcaClasses(classes);
 
         // Charger les actifs
-        const assetsRef = collection(db, "assets");
-        const q = query(assetsRef, where("userId", "==", currentUser.uid));
+        // Utiliser une sous-collection : users/{userId}/assets
+        const assetsRef = collection(db, "users", currentUser.uid, "assets");
+        const q = query(assetsRef);
         const snapshot = await getDocs(q);
         
         const assetsData: Asset[] = [];
@@ -85,7 +86,6 @@ export default function Assets() {
     try {
       const assetData = {
         id: nanoid(),
-        userId: currentUser.uid,
         description: formData.description,
         purchaseDate: formData.purchaseDate,
         cost: parseFloat(formData.cost),
@@ -96,7 +96,8 @@ export default function Assets() {
         updatedAt: new Date().toISOString(),
       };
 
-      const assetsRef = collection(db, "assets");
+      // Utiliser une sous-collection : users/{userId}/assets
+      const assetsRef = collection(db, "users", currentUser.uid, "assets");
       await addDoc(assetsRef, assetData);
       
       // Réinitialiser le formulaire
@@ -135,7 +136,8 @@ export default function Assets() {
     }
 
     try {
-      const assetRef = doc(db, "assets", assetId);
+      // Utiliser une sous-collection : users/{userId}/assets
+      const assetRef = doc(db, "users", currentUser.uid, "assets", assetId);
       await deleteDoc(assetRef);
       setAssets(assets.filter(a => a.id !== assetId));
     } catch (error: any) {

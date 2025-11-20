@@ -1,8 +1,9 @@
-import React, { ReactNode, useState } from "react";
+import React, { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useFiscalYearContext } from "../contexts/FiscalYearContext";
+import { useUsageMode } from "../contexts/UsageModeContext";
 import {
   BarChart3,
   Building2,
@@ -21,6 +22,10 @@ import {
   LogOut,
   AlertTriangle,
   Package,
+  Wallet,
+  CreditCard,
+  PiggyBank,
+  Target,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -28,6 +33,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
 interface MainLayoutProps {
@@ -40,8 +47,15 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [profileImageError, setProfileImageError] = useState(false);
   const location = useLocation();
   const { selectedYear, setSelectedYear, availableYears } = useFiscalYearContext();
+  const { usageType, currentMode, setCurrentMode } = useUsageMode();
+
+  // Réinitialiser l'erreur d'image quand la photoURL change
+  useEffect(() => {
+    setProfileImageError(false);
+  }, [currentUser?.photoURL]);
 
   const handleLogout = async () => {
     try {
@@ -60,7 +74,8 @@ export default function MainLayout({ children }: MainLayoutProps) {
     }
   };
 
-  const navigationItems = [
+  // Navigation items pour entreprise
+  const businessNavigationItems = [
     {
       name: t("sidebar.dashboard"),
       href: "/",
@@ -108,6 +123,60 @@ export default function MainLayout({ children }: MainLayoutProps) {
     },
   ];
 
+  // Navigation items pour finance personnelle
+  const personalNavigationItems = [
+    {
+      name: "Tableau de bord",
+      href: "/",
+      icon: BarChart3,
+    },
+    {
+      name: "Transactions",
+      href: "/transactions",
+      icon: DollarSign,
+    },
+    {
+      name: "Budget",
+      href: "/budget",
+      icon: Target,
+    },
+    {
+      name: "Comptes",
+      href: "/accounts",
+      icon: Wallet,
+    },
+    {
+      name: "Cartes",
+      href: "/cards",
+      icon: CreditCard,
+    },
+    {
+      name: "Épargne",
+      href: "/savings",
+      icon: PiggyBank,
+    },
+    {
+      name: "Rapports",
+      href: "/reports",
+      icon: FileText,
+    },
+    {
+      name: "Paramètres",
+      href: "/settings",
+      icon: Settings,
+    },
+  ];
+
+  // Déterminer quelle navigation utiliser
+  const getNavigationItems = () => {
+    if (usageType === "personal" || (usageType === "both" && currentMode === "personal")) {
+      return personalNavigationItems;
+    }
+    return businessNavigationItems;
+  };
+
+  const navigationItems = getNavigationItems();
+
   const isActive = (href: string) => {
     if (href === "/") {
       return location.pathname === "/";
@@ -121,7 +190,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
       <div
         className={`${
           sidebarOpen ? "w-72" : "w-20"
-        } bg-[hsl(222.2,47.4%,11.2%)] text-white transition-all duration-300 border-r border-[hsl(217.2,32.6%,20%)] flex flex-col shadow-xl`}
+        } bg-[hsl(222.2,47.4%,11.2%)] text-white transition-all duration-300 border-r border-[hsl(217.2,32.6%,20%)] flex flex-col shadow-xl h-screen overflow-hidden`}
       >
         {/* Logo/Brand */}
         <div className="flex items-center justify-between h-20 px-6 border-b border-sidebar-border/50">
@@ -146,9 +215,33 @@ export default function MainLayout({ children }: MainLayoutProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
-          {/* Sélecteur d'année fiscale */}
-          {sidebarOpen && (
+        <nav className="flex-1 px-3 py-6 space-y-1 overflow-hidden">
+          {/* Switch pour basculer entre personnelle et entreprise (si usageType = "both") */}
+          {sidebarOpen && usageType === "both" && (
+            <div className="mb-4 px-4">
+              <div className="bg-white/10 border border-white/20 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="mode-switch" className="text-white text-sm font-medium cursor-pointer">
+                    {currentMode === "business" ? "Entreprise" : "Personnelle"}
+                  </Label>
+                  <Switch
+                    id="mode-switch"
+                    checked={currentMode === "personal"}
+                    onCheckedChange={(checked) => setCurrentMode(checked ? "personal" : "business")}
+                    className="data-[state=checked]:bg-sidebar-primary"
+                  />
+                </div>
+                <p className="text-xs text-white/70">
+                  {currentMode === "business" 
+                    ? "Mode entreprise actif" 
+                    : "Mode finance personnelle actif"}
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {/* Sélecteur d'année fiscale (uniquement pour entreprise) */}
+          {sidebarOpen && (usageType === "business" || (usageType === "both" && currentMode === "business")) && (
             <div className="mb-4 px-4">
               <select
                 value={selectedYear}
@@ -244,11 +337,12 @@ export default function MainLayout({ children }: MainLayoutProps) {
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-3 pl-4 border-l border-border hover:opacity-80 transition-opacity cursor-pointer">
               <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/80 rounded-full flex items-center justify-center shadow-lg shadow-primary/20">
-                    {currentUser?.photoURL ? (
+                    {currentUser?.photoURL && !profileImageError ? (
                       <img 
                         src={currentUser.photoURL} 
                         alt={currentUser.displayName || "User"} 
-                        className="w-10 h-10 rounded-full"
+                        className="w-10 h-10 rounded-full object-cover"
+                        onError={() => setProfileImageError(true)}
                       />
                     ) : (
                 <User className="w-5 h-5 text-primary-foreground" />

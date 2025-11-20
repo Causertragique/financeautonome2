@@ -12,57 +12,148 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Règles pour la collection users (profils utilisateurs)
-    // Chaque utilisateur peut uniquement accéder à son propre profil
+    // Règles pour la collection users et toutes ses sous-collections
+    // Chaque utilisateur peut uniquement accéder à ses propres données
     match /users/{userId} {
+      // Profil utilisateur
+      // Permettre la lecture si l'utilisateur est le propriétaire
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId);
-      allow update, delete: if isOwner(userId);
+      // Permettre la création si l'utilisateur est authentifié et crée son propre profil
+      allow create: if isAuthenticated() && request.auth.uid == userId && request.resource.data.userId == userId;
+      // Permettre la mise à jour si l'utilisateur est le propriétaire
+      allow update: if isOwner(userId) && request.resource.data.userId == userId;
+      // Permettre la suppression si l'utilisateur est le propriétaire
+      allow delete: if isOwner(userId);
+      
+      // Sous-collection transactions
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow update, delete: if isOwner(userId);
+      }
+      
+      // Sous-collection companies
+      match /companies/{companyId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow update, delete: if isOwner(userId);
+      }
+      
+      // Sous-collection vehicleExpenses
+      match /vehicleExpenses/{vehicleExpenseId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow update, delete: if isOwner(userId);
+      }
+      
+      // Sous-collection vehicleAnnualProfiles
+      match /vehicleAnnualProfiles/{profileId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow update, delete: if isOwner(userId);
+      }
+      
+      // Sous-collection homeOfficeExpenses
+      match /homeOfficeExpenses/{expenseId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow update, delete: if isOwner(userId);
+      }
+      
+      // Sous-collection techExpenses
+      match /techExpenses/{expenseId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow update, delete: if isOwner(userId);
+      }
+      
+      // Sous-collection assets
+      match /assets/{assetId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // Permettre l'accès à toutes les autres sous-collections pour cet utilisateur
+      match /{document=**} {
+        allow read, write: if isOwner(userId);
+      }
     }
     
-    // Règles pour la collection transactions
-    // Chaque utilisateur peut uniquement accéder à ses propres transactions
+    // Règles pour les collections legacy (pour compatibilité avec les anciennes données et migration)
+    // À supprimer une fois la migration terminée
     match /transactions/{transactionId} {
-      allow read: if isOwner(resource.data.userId);
-      allow create: if isOwner(request.resource.data.userId);
-      allow update, delete: if isOwner(resource.data.userId);
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
     }
     
-    // Règles pour la collection companies
-    // Chaque utilisateur peut uniquement accéder à ses propres companies
+    // Permettre les requêtes de liste sur les collections legacy pour la migration
+    match /transactions {
+      allow list: if isAuthenticated();
+    }
+    
     match /companies/{companyId} {
-      allow read: if isOwner(resource.data.userId);
-      allow create: if isOwner(request.resource.data.userId);
-      allow update, delete: if isOwner(resource.data.userId);
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
     }
     
-    // Règles pour la collection paymentMethods
-    // Chaque utilisateur peut uniquement accéder à ses propres modes de paiement
-    match /paymentMethods/{paymentMethodId} {
-      allow read: if isOwner(resource.data.userId);
-      allow create: if isOwner(request.resource.data.userId);
-      allow update, delete: if isOwner(resource.data.userId);
+    match /companies {
+      allow list: if isAuthenticated();
     }
     
-            // Règles pour la collection assets
-            // Chaque utilisateur peut uniquement accéder à ses propres actifs
-            match /assets/{assetId} {
-              allow read: if isOwner(resource.data.userId);
-              allow create: if isOwner(request.resource.data.userId);
-              allow update, delete: if isOwner(resource.data.userId);
-            }
-            
-            // Règles pour la collection vehicleExpenses
-            // Chaque utilisateur peut uniquement accéder à ses propres dépenses véhicule
-            match /vehicleExpenses/{vehicleExpenseId} {
-              allow read: if isOwner(resource.data.userId);
-              allow create: if isOwner(request.resource.data.userId);
-              allow update, delete: if isOwner(resource.data.userId);
-            }
-            
-            // Règles par défaut : refuser l'accès aux autres collections
-            match /{document=**} {
-              allow read, write: if false;
-            }
+    match /vehicleExpenses/{vehicleExpenseId} {
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+    }
+    
+    match /vehicleExpenses {
+      allow list: if isAuthenticated();
+    }
+    
+    match /vehicleAnnualProfiles/{profileId} {
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+    }
+    
+    match /vehicleAnnualProfiles {
+      allow list: if isAuthenticated();
+    }
+    
+    match /homeOfficeExpenses/{expenseId} {
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+    }
+    
+    match /homeOfficeExpenses {
+      allow list: if isAuthenticated();
+    }
+    
+    match /techExpenses/{expenseId} {
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+    }
+    
+    match /techExpenses {
+      allow list: if isAuthenticated();
+    }
+    
+    match /assets/{assetId} {
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+    }
+    
+    match /assets {
+      allow list: if isAuthenticated();
+    }
+    
+    // Règles par défaut : refuser l'accès aux autres collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }

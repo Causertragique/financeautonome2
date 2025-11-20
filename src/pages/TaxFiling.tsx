@@ -6,27 +6,18 @@ import { useFiscalYearContext } from "../contexts/FiscalYearContext";
 import {
   getTransactions,
   type Transaction,
-  getVehicleExpenses,
-  addVehicleExpense,
-  deleteVehicleExpense,
-  type VehicleExpense,
-  getVehicleAnnualProfile,
+  getVehicleAnnualProfiles,
+  type VehicleAnnualProfile,
+  getVehicleJournals,
+  type VehicleJournalEntry,
   upsertVehicleAnnualProfile,
   deleteVehicleAnnualProfile,
-  getHomeOfficeExpenses,
-  addHomeOfficeExpense,
-  deleteHomeOfficeExpense,
-  type HomeOfficeExpense,
-  getTechExpenses,
-  addTechExpense,
-  deleteTechExpense,
-  type TechExpense,
-  type VehicleAnnualProfile,
+  addVehicleJournalEntry,
+  updateVehicleJournalEntry,
+  deleteVehicleJournalEntry,
 } from "../lib/db";
-import { VehicleExpenseForm } from "../components/VehicleExpenseForm";
 import { VehicleAnnualForm } from "../components/VehicleAnnualForm";
-import { HomeOfficeForm } from "../components/HomeOfficeForm";
-import { TechExpensesForm } from "../components/TechExpensesForm";
+import { VehicleExpenseForm } from "../components/VehicleExpenseForm";
 import { shouldRegisterForTaxes } from "../lib/taxRules";
 import {
   FileText,
@@ -35,7 +26,11 @@ import {
   Car,
   Plus,
   Trash2,
+  Home,
+  Cpu,
 } from "lucide-react";
+
+type ActiveTab = "taxes" | "vehicle" | "homeoffice" | "tech";
 
 interface TaxReturn {
   period: string;
@@ -49,8 +44,6 @@ interface TaxReturn {
   filedDate?: string;
 }
 
-type ActiveTab = "taxes" | "summary" | "vehicle" | "homeoffice" | "tech";
-
 export default function TaxFiling() {
   const { t } = useLanguage();
   const { currentUser } = useAuth();
@@ -60,19 +53,15 @@ export default function TaxFiling() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("taxes");
 
-  const [vehicleExpenses, setVehicleExpenses] = useState<VehicleExpense[]>([]);
-  const [showVehicleForm, setShowVehicleForm] = useState(false);
-  const [annualProfile, setAnnualProfile] = useState<VehicleAnnualProfile | null>(
+  const [vehicleProfiles, setVehicleProfiles] = useState<VehicleAnnualProfile[]>([]);
+  const [vehicleJournals, setVehicleJournals] = useState<VehicleJournalEntry[]>([]);
+
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+
+  const [showJournalForm, setShowJournalForm] = useState(false);
+  const [editingJournal, setEditingJournal] = useState<VehicleJournalEntry | null>(
     null
   );
-
-  const [homeOfficeExpenses, setHomeOfficeExpenses] = useState<
-    HomeOfficeExpense[]
-  >([]);
-  const [showHomeOfficeForm, setShowHomeOfficeForm] = useState(false);
-
-  const [techExpenses, setTechExpenses] = useState<TechExpense[]>([]);
-  const [showTechForm, setShowTechForm] = useState(false);
 
   // Chargement des données
   useEffect(() => {
@@ -90,42 +79,30 @@ export default function TaxFiling() {
       }
     };
 
-    const loadVehicleExpenses = async () => {
+    const loadVehicleProfiles = async () => {
       try {
-        const data = await getVehicleExpenses(selectedYear);
-        setVehicleExpenses(data);
-      } catch (error) {
-        console.error("Erreur lors du chargement des dépenses véhicule:", error);
-      }
-    };
-
-    const loadVehicleAnnual = async () => {
-      try {
-        const profile = await getVehicleAnnualProfile(selectedYear);
-        setAnnualProfile(profile);
-      } catch (error) {
-        console.error("Erreur lors du chargement du profil annuel véhicule:", error);
-      }
-    };
-
-    const loadHomeOffice = async () => {
-      try {
-        const data = await getHomeOfficeExpenses(selectedYear);
-        setHomeOfficeExpenses(data);
+        const profiles = await getVehicleAnnualProfiles(selectedYear);
+        setVehicleProfiles(profiles);
+        if (!selectedProfileId && profiles.length > 0) {
+          setSelectedProfileId(profiles[0].id);
+        }
       } catch (error) {
         console.error(
-          "Erreur lors du chargement des dépenses bureau à domicile:",
+          "Erreur lors du chargement des profils annuels véhicule:",
           error
         );
       }
     };
 
-    const loadTech = async () => {
+    const loadVehicleJournals = async () => {
       try {
-        const data = await getTechExpenses(selectedYear);
-        setTechExpenses(data);
+        const journals = await getVehicleJournals(selectedYear);
+        setVehicleJournals(journals);
       } catch (error) {
-        console.error("Erreur lors du chargement des dépenses techno:", error);
+        console.error(
+          "Erreur lors du chargement des journaux de déplacements:",
+          error
+        );
       }
     };
 
@@ -133,10 +110,8 @@ export default function TaxFiling() {
       setLoading(true);
       await Promise.all([
         loadTransactions(),
-        loadVehicleExpenses(),
-        loadVehicleAnnual(),
-        loadHomeOffice(),
-        loadTech(),
+        loadVehicleProfiles(),
+        loadVehicleJournals(),
       ]);
       setLoading(false);
     };
@@ -146,45 +121,38 @@ export default function TaxFiling() {
     const handleTransactionsUpdated = () => {
       void loadTransactions();
     };
-    const handleVehicleExpensesUpdated = () => {
-      void loadVehicleExpenses();
-      void loadTransactions();
+    const handleVehicleProfilesUpdated = () => {
+      void loadVehicleProfiles();
     };
-    const handleVehicleAnnualUpdated = () => {
-      void loadVehicleAnnual();
-    };
-    const handleHomeOfficeUpdated = () => {
-      void loadHomeOffice();
-    };
-    const handleTechUpdated = () => {
-      void loadTech();
+    const handleVehicleJournalsUpdated = () => {
+      void loadVehicleJournals();
+      void loadVehicleProfiles(); // pour mettre à jour les agrégats dans les profils
     };
 
     window.addEventListener("transactionsUpdated", handleTransactionsUpdated);
-    window.addEventListener("vehicleExpensesUpdated", handleVehicleExpensesUpdated);
-    window.addEventListener("vehicleAnnualProfileUpdated", handleVehicleAnnualUpdated);
-    window.addEventListener("homeOfficeExpensesUpdated", handleHomeOfficeUpdated);
-    window.addEventListener("techExpensesUpdated", handleTechUpdated);
+    window.addEventListener(
+      "vehicleAnnualProfileUpdated",
+      handleVehicleProfilesUpdated
+    );
+    window.addEventListener(
+      "vehicleJournalsUpdated",
+      handleVehicleJournalsUpdated
+    );
 
     return () => {
       window.removeEventListener("transactionsUpdated", handleTransactionsUpdated);
       window.removeEventListener(
-        "vehicleExpensesUpdated",
-        handleVehicleExpensesUpdated
-      );
-      window.removeEventListener(
         "vehicleAnnualProfileUpdated",
-        handleVehicleAnnualUpdated
+        handleVehicleProfilesUpdated
       );
       window.removeEventListener(
-        "homeOfficeExpensesUpdated",
-        handleHomeOfficeUpdated
+        "vehicleJournalsUpdated",
+        handleVehicleJournalsUpdated
       );
-      window.removeEventListener("techExpensesUpdated", handleTechUpdated);
     };
-  }, [selectedYear, currentUser]);
+  }, [selectedYear, currentUser, selectedProfileId]);
 
-  // Calcul GST/QST sur l'année
+  // Calcul GST/QST sur l'année (basé sur transactions)
   const calculateGSTQSTReturn = () => {
     const periodStart = new Date(selectedYear, 0, 1);
     const periodEnd = new Date(selectedYear, 11, 31);
@@ -223,19 +191,6 @@ export default function TaxFiling() {
       }
     });
 
-    // ITC provenant des dépenses véhicule structurées
-    const vehicleGstItc = vehicleExpenses.reduce(
-      (sum, ve) => sum + (ve.gstItc || 0),
-      0
-    );
-    const vehicleQstItc = vehicleExpenses.reduce(
-      (sum, ve) => sum + (ve.qstItc || 0),
-      0
-    );
-
-    gstItc += vehicleGstItc;
-    qstItc += vehicleQstItc;
-
     return {
       gstCollected,
       qstCollected,
@@ -246,183 +201,17 @@ export default function TaxFiling() {
     };
   };
 
-  const taxReturn = calculateGSTQSTReturn();
+  const taxReturn: TaxReturn = {
+    period: `${selectedYear}-01-01/${selectedYear}-12-31`,
+    ...calculateGSTQSTReturn(),
+    status: "draft",
+  };
 
   const totalRevenue = transactions
     .filter((t) => t.type === "income")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  // Dépenses déductibles basées sur transactions
-  const calculateDeductibleExpenses = () => {
-    const periodStart = new Date(selectedYear, 0, 1);
-    const periodEnd = new Date(selectedYear, 11, 31);
-
-    const deductibleExpenses = transactions
-      .filter((transaction) => {
-        const transactionDate = new Date(transaction.date);
-        return (
-          transaction.type === "expense" &&
-          transactionDate >= periodStart &&
-          transactionDate <= periodEnd
-        );
-      })
-      .map((transaction) => {
-        const deductibleAmount = transaction.deductibleRatio
-          ? transaction.amount * transaction.deductibleRatio
-          : transaction.amount;
-
-        return {
-          ...transaction,
-          deductibleAmount,
-          nonDeductibleAmount: transaction.amount - deductibleAmount,
-        };
-      });
-
-    const totalDeductible = deductibleExpenses.reduce(
-      (sum, exp) => sum + exp.deductibleAmount,
-      0
-    );
-    const totalNonDeductible = deductibleExpenses.reduce(
-      (sum, exp) => sum + exp.nonDeductibleAmount,
-      0
-    );
-    const totalExpenses = deductibleExpenses.reduce(
-      (sum, exp) => sum + exp.amount,
-      0
-    );
-
-    return {
-      expenses: deductibleExpenses,
-      totalDeductible,
-      totalNonDeductible,
-      totalExpenses,
-    };
-  };
-
-  const deductibleData = calculateDeductibleExpenses();
-
-  // Totaux modules structurés
-  const vehicleDeductibleTotal = vehicleExpenses.reduce(
-    (sum, ve) => sum + (ve.deductibleTotal || 0),
-    0
-  );
-
-  const homeOfficeDeductibleTotal = homeOfficeExpenses.reduce(
-    (sum, e) => sum + (e.deductibleTotal || 0),
-    0
-  );
-
-  const techDeductibleTotal = techExpenses.reduce(
-    (sum, e) => sum + (e.deductibleTotal || 0),
-    0
-  );
-
-  const techCapitalizableTotal = techExpenses.reduce(
-    (sum, e) => sum + (e.capitalizableHardware || 0),
-    0
-  );
-
-  const totalStructuredDeductible =
-    vehicleDeductibleTotal + homeOfficeDeductibleTotal + techDeductibleTotal;
-
-  // Handlers formulaires
-  const handleVehicleExpenseSubmit = async (values: any) => {
-    try {
-      await addVehicleExpense({
-        vehicleName: values.vehicleName,
-        periodStart: values.periodStart,
-        periodEnd: values.periodEnd,
-        totalKm: values.totalKm,
-        businessKm: values.businessKm,
-        businessRatio: values.businessRatio,
-        fuel: values.fuel,
-        maintenance: values.maintenance,
-        insurance: values.insurance,
-        registration: values.registration,
-        parkingAndTolls: values.parkingAndTolls,
-        leaseOrLoan: values.leaseOrLoan,
-        other: values.other,
-        businessFuel: values.businessFuel || 0,
-        businessMaintenance: values.businessMaintenance || 0,
-        businessParkingAndTolls: values.businessParkingAndTolls || 0,
-        businessOther: values.businessOther || 0,
-        deductibleTotal: values.deductibleTotal,
-        gstOnExpenses: values.gstOnExpenses || 0,
-        qstOnExpenses: values.qstOnExpenses || 0,
-        gstOnBusinessExpenses: values.gstOnBusinessExpenses || 0,
-        qstOnBusinessExpenses: values.qstOnBusinessExpenses || 0,
-      });
-      setShowVehicleForm(false);
-    } catch (error) {
-      console.error("Erreur lors de l'enregistrement dépense véhicule:", error);
-    }
-  };
-
-  const handleDeleteVehicleExpense = async (id: string) => {
-    if (confirm("Êtes-vous sûr de vouloir supprimer cette dépense véhicule ?")) {
-      await deleteVehicleExpense(id);
-    }
-  };
-
-  const handleHomeOfficeSubmit = async (values: any) => {
-    try {
-      await addHomeOfficeExpense({
-        periodStart: values.periodStart,
-        periodEnd: values.periodEnd,
-        totalArea: values.totalArea,
-        officeArea: values.officeArea,
-        businessAreaRatio: values.businessAreaRatio,
-        rent: values.rent,
-        electricityHeating: values.electricityHeating,
-        condoFees: values.condoFees,
-        propertyTaxes: values.propertyTaxes,
-        homeInsurance: values.homeInsurance,
-        other: values.other,
-      });
-      setShowHomeOfficeForm(false);
-    } catch (error) {
-      console.error("Erreur lors de l'enregistrement bureau à domicile:", error);
-    }
-  };
-
-  const handleDeleteHomeOffice = async (id: string) => {
-    if (
-      confirm(
-        "Êtes-vous sûr de vouloir supprimer cette entrée de bureau à domicile ?"
-      )
-    ) {
-      await deleteHomeOfficeExpense(id);
-    }
-  };
-
-  const handleTechSubmit = async (values: any) => {
-    try {
-      await addTechExpense({
-        periodStart: values.periodStart,
-        periodEnd: values.periodEnd,
-        hardwareSmallEquipment: values.hardwareSmallEquipment,
-        hardwareCapitalAssets: values.hardwareCapitalAssets,
-        softwareLicenses: values.softwareLicenses,
-        saasSubscriptions: values.saasSubscriptions,
-        internetTotal: values.internetTotal,
-        internetBusinessRatio: values.internetBusinessRatio,
-        phoneTotal: values.phoneTotal,
-        phoneBusinessRatio: values.phoneBusinessRatio,
-        otherTech: values.otherTech,
-      });
-      setShowTechForm(false);
-    } catch (error) {
-      console.error("Erreur lors de l'enregistrement dépenses techno:", error);
-    }
-  };
-
-  const handleDeleteTech = async (id: string) => {
-    if (confirm("Supprimer cette dépense techno ?")) {
-      await deleteTechExpense(id);
-    }
-  };
-
-  // Vérifier si l'enregistrement GST/QST est requis
+  // Enregistrement requis ?
   const [registrationRequired, setRegistrationRequired] = useState<{
     gstRequired: boolean;
     qstRequired: boolean;
@@ -443,6 +232,151 @@ export default function TaxFiling() {
     checkRegistration();
   }, [totalRevenue]);
 
+  // Totaux véhicule (pour info)
+  const totalVehicleDeductible = vehicleProfiles.reduce(
+    (sum, vp) => sum + (vp.deductibleTotal || 0),
+    0
+  );
+
+  const selectedProfile: VehicleAnnualProfile | null =
+    selectedProfileId && vehicleProfiles.length > 0
+      ? vehicleProfiles.find((p) => p.id === selectedProfileId) || null
+      : vehicleProfiles[0] || null;
+
+  // Résumés maison / techno basés sur les transactions
+  const homeOfficeExpenses = transactions.filter((t) => {
+    if (t.type !== "expense") return false;
+    const cat = (t.category || "").toLowerCase();
+    const tags = (t.tags || []).map((x) => x.toLowerCase());
+    return (
+      cat.includes("home") ||
+      cat.includes("bureau") ||
+      tags.includes("home") ||
+      tags.includes("homeoffice") ||
+      tags.includes("bureau")
+    );
+  });
+  const homeOfficeTotal = homeOfficeExpenses.reduce(
+    (sum, t) => sum + t.amount,
+    0
+  );
+
+  const techExpenses = transactions.filter((t) => {
+    if (t.type !== "expense") return false;
+    const cat = (t.category || "").toLowerCase();
+    const tags = (t.tags || []).map((x) => x.toLowerCase());
+    return (
+      cat.includes("tech") ||
+      cat.includes("informatique") ||
+      cat.includes("saas") ||
+      cat.includes("software") ||
+      cat.includes("hardware") ||
+      tags.includes("tech") ||
+      tags.includes("saas") ||
+      tags.includes("logiciel")
+    );
+  });
+  const techTotal = techExpenses.reduce((sum, t) => sum + t.amount, 0);
+
+  // Handlers profil annuel
+  const handleSaveVehicleProfile = async (data: {
+    id?: string;
+    vehicleName: string;
+    totalKm: number;
+    insuranceAnnual: number;
+    leaseFinanceAnnual: number;
+    maintenanceAnnual: number;
+    fuelAnnual: number;
+    registrationAnnual: number;
+    otherAnnual: number;
+  }) => {
+    try {
+      const id = await upsertVehicleAnnualProfile(selectedYear, data);
+      if (id) {
+        console.log("✅ Profil véhicule enregistré avec succès, ID:", id);
+        if (!selectedProfileId) {
+          setSelectedProfileId(id);
+        }
+        // Recharger les profils pour mettre à jour l'affichage
+        const profiles = await getVehicleAnnualProfiles(selectedYear);
+        setVehicleProfiles(profiles);
+      } else {
+        console.error("❌ Échec de l'enregistrement du profil véhicule");
+        alert("Erreur lors de l'enregistrement du profil. Vérifiez la console pour plus de détails.");
+      }
+    } catch (error) {
+      console.error("❌ Erreur lors de l'enregistrement du profil véhicule:", error);
+      alert("Erreur lors de l'enregistrement du profil. Vérifiez la console pour plus de détails.");
+    }
+  };
+
+  const handleDeleteVehicleProfile = async () => {
+    if (!selectedProfile) return;
+    if (
+      !confirm(
+        `Supprimer le profil annuel pour ${selectedProfile.vehicleName} ?`
+      )
+    ) {
+      return;
+    }
+    await deleteVehicleAnnualProfile(selectedProfile.id);
+    setSelectedProfileId(null);
+  };
+
+  // Handlers journal
+  const handleJournalSubmit = async (payload: {
+    id?: string;
+    year: number;
+    vehicleProfileId: string;
+    vehicleName: string;
+    periodStart: string;
+    periodEnd: string;
+    businessKm: number;
+    parking: number;
+    other: number;
+    periodTotal: number;
+  }) => {
+    if (payload.id) {
+      await updateVehicleJournalEntry(payload.id, {
+        year: payload.year,
+        vehicleProfileId: payload.vehicleProfileId,
+        vehicleName: payload.vehicleName,
+        periodStart: payload.periodStart,
+        periodEnd: payload.periodEnd,
+        businessKm: payload.businessKm,
+        parking: payload.parking,
+        other: payload.other,
+        periodTotal: payload.periodTotal,
+      });
+    } else {
+      await addVehicleJournalEntry({
+        year: payload.year,
+        vehicleProfileId: payload.vehicleProfileId,
+        vehicleName: payload.vehicleName,
+        periodStart: payload.periodStart,
+        periodEnd: payload.periodEnd,
+        businessKm: payload.businessKm,
+        parking: payload.parking,
+        other: payload.other,
+        periodTotal: payload.periodTotal,
+      });
+    }
+
+    setShowJournalForm(false);
+    setEditingJournal(null);
+  };
+
+  const handleDeleteJournal = async (entry: VehicleJournalEntry) => {
+    if (
+      !confirm(
+        `Supprimer le journal du ${entry.periodStart} au ${entry.periodEnd} pour ${entry.vehicleName} ?`
+      )
+    ) {
+      return;
+    }
+    await deleteVehicleJournalEntry(entry.id);
+  };
+
   if (loading) {
     return (
       <MainLayout>
@@ -462,12 +396,12 @@ export default function TaxFiling() {
             Déclarations fiscales
           </h1>
           <p className="text-sm text-muted-foreground">
-            Gestion des taxes et des dépenses admissibles – année {selectedYear}
+            Année {selectedYear} – Taxes et dépenses admissibles
           </p>
         </div>
       </div>
 
-      {/* Onglets principaux */}
+      {/* Onglets */}
       <div className="flex gap-2 mb-6 border-b border-border overflow-x-auto">
         <button
           onClick={() => setActiveTab("taxes")}
@@ -478,16 +412,6 @@ export default function TaxFiling() {
           }`}
         >
           Taxes (GST/QST)
-        </button>
-        <button
-          onClick={() => setActiveTab("summary")}
-          className={`px-4 py-2 font-medium text-sm whitespace-nowrap transition-colors ${
-            activeTab === "summary"
-              ? "text-primary border-b-2 border-primary"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Résumé dépenses
         </button>
         <button
           onClick={() => setActiveTab("vehicle")}
@@ -581,13 +505,11 @@ export default function TaxFiling() {
                     -{taxReturn.gstPaid.toFixed(2)} $
                   </span>
                 </div>
-                <div className="border-top border-border pt-2 mt-2 flex justify-between">
+                <div className="border-t border-border pt-2 mt-2 flex justify-between">
                   <span className="font-semibold">Solde net à remettre:</span>
                   <span
                     className={`font-bold ${
-                      taxReturn.gstNet >= 0
-                        ? "text-red-600"
-                        : "text-green-600"
+                      taxReturn.gstNet >= 0 ? "text-red-600" : "text-green-600"
                     }`}
                   >
                     {taxReturn.gstNet >= 0 ? "+" : ""}
@@ -595,8 +517,8 @@ export default function TaxFiling() {
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Inclut les ITC basés sur les transactions et sur les dépenses
-                  véhicule détaillées.
+                  Basé sur les transactions déclarées comme imposables avec GST et les ITC
+                  saisis sur les dépenses.
                 </p>
               </div>
             </div>
@@ -619,13 +541,11 @@ export default function TaxFiling() {
                     -{taxReturn.qstPaid.toFixed(2)} $
                   </span>
                 </div>
-                <div className="border-top border-border pt-2 mt-2 flex justify-between">
+                <div className="border-t border-border pt-2 mt-2 flex justify-between">
                   <span className="font-semibold">Solde net à remettre:</span>
                   <span
                     className={`font-bold ${
-                      taxReturn.qstNet >= 0
-                        ? "text-red-600"
-                        : "text-green-600"
+                      taxReturn.qstNet >= 0 ? "text-red-600" : "text-green-600"
                     }`}
                   >
                     {taxReturn.qstNet >= 0 ? "+" : ""}
@@ -633,376 +553,348 @@ export default function TaxFiling() {
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Inclut les ITC basés sur les transactions et sur les dépenses
-                  véhicule détaillées.
+                  Basé sur les transactions déclarées comme imposables avec QST et les ITC
+                  saisis sur les dépenses.
                 </p>
               </div>
+            </div>
+          </div>
+
+          {/* Info véhicule pour l'impôt revenu */}
+          <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+            <h2 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+              <Car className="w-4 h-4" />
+              Dépenses admissibles liées au véhicule (impôt sur le revenu)
+            </h2>
+            <p className="text-sm text-muted-foreground mb-2">
+              Total des dépenses admissibles calculées à partir du profil annuel véhicule
+              et du journal des déplacements pour {selectedYear}.
+            </p>
+            <div className="flex justify-between text-sm mt-2">
+              <span className="text-muted-foreground">
+                Total déductible véhicule (tous véhicules):
+              </span>
+              <span className="font-semibold text-emerald-700">
+                {totalVehicleDeductible.toFixed(2)} $
+              </span>
             </div>
           </div>
         </>
       )}
 
-      {/* === Onglet RÉSUMÉ DÉPENSES === */}
-      {activeTab === "summary" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <h3 className="text-sm font-semibold mb-2">
-                Revenus & dépenses (transactions)
-              </h3>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Revenus:</span>
-                  <span className="font-medium">
-                    {totalRevenue.toFixed(2)} $
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    Dépenses brutes:
-                  </span>
-                  <span className="font-medium">
-                    {deductibleData.totalExpenses.toFixed(2)} $
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    Non admissibles:
-                  </span>
-                  <span className="font-medium text-red-600">
-                    {deductibleData.totalNonDeductible.toFixed(2)} $
-                  </span>
-                </div>
-                <div className="border-t border-border mt-2 pt-2 flex justify-between">
-                  <span className="font-semibold">
-                    Admissibles (transactions):
-                  </span>
-                  <span className="font-semibold text-emerald-700">
-                    {deductibleData.totalDeductible.toFixed(2)} $
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <h3 className="text-sm font-semibold mb-2">
-                Modules structurés (auto / bureau / techno)
-              </h3>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Véhicule:</span>
-                  <span className="font-medium">
-                    {vehicleDeductibleTotal.toFixed(2)} $
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    Bureau à domicile:
-                  </span>
-                  <span className="font-medium">
-                    {homeOfficeDeductibleTotal.toFixed(2)} $
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Technologie:</span>
-                  <span className="font-medium">
-                    {techDeductibleTotal.toFixed(2)} $
-                  </span>
-                </div>
-                <div className="border-t border-border mt-2 pt-2 flex justify-between">
-                  <span className="font-semibold">
-                    Total admissible (modules):
-                  </span>
-                  <span className="font-semibold text-emerald-700">
-                    {totalStructuredDeductible.toFixed(2)} $
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <h3 className="text-sm font-semibold mb-2">
-                Immobilisations (CCA)
-              </h3>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    Matériel capitalisable (tech):
-                  </span>
-                  <span className="font-medium">
-                    {techCapitalizableTotal.toFixed(2)} $
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Ces montants servent à calculer la déduction pour amortissement
-                  (CCA) dans tes déclarations fiscales.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* === Onglet VÉHICULE === */}
       {activeTab === "vehicle" && (
         <div className="space-y-6">
-          <section className="space-y-4">
+          {/* Profil annuel */}
+          <section className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <Car className="w-4 h-4" />
-                Véhicule – profil annuel
+                Profil annuel du véhicule
               </h2>
+              {vehicleProfiles.length > 1 && (
+                <select
+                  className="text-xs rounded-md border border-input bg-background px-2 py-1.5"
+                  value={selectedProfile?.id || ""}
+                  onChange={(e) => setSelectedProfileId(e.target.value)}
+                  aria-label="Sélectionner un profil de véhicule"
+                >
+                  {vehicleProfiles.map((vp) => (
+                    <option key={vp.id} value={vp.id}>
+                      {vp.vehicleName} ({vp.year})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <VehicleAnnualForm
               year={selectedYear}
-              initialProfile={annualProfile}
-              onSave={async (data) => {
-                await upsertVehicleAnnualProfile(selectedYear, data);
-              }}
+              initialProfile={selectedProfile}
+              onSave={handleSaveVehicleProfile}
               onDelete={
-                annualProfile
-                  ? async () => {
-                      await deleteVehicleAnnualProfile(selectedYear);
-                    }
-                  : undefined
+                selectedProfile ? () => handleDeleteVehicleProfile() : undefined
               }
             />
+
+            {selectedProfile && (
+              <div className="mt-3 grid gap-3 md:grid-cols-3 text-xs bg-muted/50 border border-border rounded-lg p-3">
+                <div>
+                  <p className="font-semibold mb-1">Kilométrage</p>
+                  <p className="text-muted-foreground">
+                    Km totaux :{" "}
+                    <span className="font-medium">
+                      {selectedProfile.totalKm.toFixed(0)} km
+                    </span>
+                  </p>
+                  <p className="text-muted-foreground">
+                    Km d&apos;affaires :{" "}
+                    <span className="font-medium">
+                      {selectedProfile.businessKm.toFixed(0)} km
+                    </span>
+                  </p>
+                  <p className="text-muted-foreground">
+                    Ratio affaires :{" "}
+                    <span className="font-medium">
+                      {(selectedProfile.businessRatio * 100).toFixed(1)} %
+                    </span>
+                  </p>
+                </div>
+                <div>
+                  <p className="font-semibold mb-1">Coûts</p>
+                  <p className="text-muted-foreground">
+                    Coûts annuels fixes :{" "}
+                    <span className="font-medium">
+                      {selectedProfile.annualFixedCosts.toFixed(2)} $
+                    </span>
+                  </p>
+                  <p className="text-muted-foreground">
+                    Parking + autres (journal) :{" "}
+                    <span className="font-medium">
+                      {selectedProfile.variableParkingAndOther.toFixed(2)} $
+                    </span>
+                  </p>
+                </div>
+                <div>
+                  <p className="font-semibold mb-1">Résultat fiscal</p>
+                  <p className="text-muted-foreground">
+                    Dépenses admissibles totales :
+                  </p>
+                  <p className="font-semibold text-emerald-700 text-base">
+                    {selectedProfile.deductibleTotal.toFixed(2)} $
+                  </p>
+                </div>
+              </div>
+            )}
           </section>
 
-          <section className="space-y-4">
-            <div className="border border-dashed border-border rounded-lg p-4 space-y-3 bg-muted/30">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">
-                  Journal des déplacements & dépenses réelles
-                </h3>
-                <button
-                  onClick={() => setShowVehicleForm((v) => !v)}
-                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border hover:bg-accent"
-                >
-                  <Plus className="w-3 h-3" />
-                  Ajouter une période
-                </button>
-              </div>
+          {/* Journal de déplacements */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                Journal des déplacements et petites dépenses
+              </h2>
+              <button
+                onClick={() => {
+                  setEditingJournal(null);
+                  setShowJournalForm(true);
+                }}
+                disabled={vehicleProfiles.length === 0}
+                className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border border-border hover:bg-accent disabled:opacity-50"
+              >
+                <Plus className="w-3 h-3" />
+                Ajouter une entrée
+              </button>
+            </div>
 
-              {showVehicleForm && (
-                <VehicleExpenseForm onSubmit={handleVehicleExpenseSubmit} />
-              )}
+            {vehicleProfiles.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Commence par créer un profil annuel de véhicule ci-dessus avant
+                d&apos;ajouter des entrées au journal.
+              </p>
+            )}
 
-              {vehicleExpenses.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Aucune dépense véhicule enregistrée pour {selectedYear}.
-                  Utilise le bouton « Ajouter une période » pour commencer à
-                  journaliser tes km Lyft et dépenses liées au travail.
-                </p>
-              ) : (
-                <div className="space-y-2 text-xs">
-                  {vehicleExpenses.map((ve) => (
-                    <div
-                      key={ve.id}
-                      className="flex items-start justify-between gap-3 border border-border rounded-md px-3 py-2 bg-background"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">
-                            {ve.vehicleName || "Véhicule"}
-                          </span>
-                          <span className="text-muted-foreground">
-                            ({ve.periodStart} → {ve.periodEnd})
-                          </span>
-                        </div>
-                        <div className="mt-1 space-y-0.5">
-                          <p className="text-muted-foreground">
-                            Km affaires :{" "}
-                            <span className="font-medium">
-                              {ve.businessKm} km
-                            </span>{" "}
-                            / ratio :{" "}
-                            <span className="font-medium">
-                              {(ve.businessRatio * 100).toFixed(1)}%
-                            </span>
-                          </p>
-                          <p className="text-muted-foreground">
-                            Dépenses admissibles :{" "}
-                            <span className="font-semibold text-emerald-700">
-                              {ve.deductibleTotal.toFixed(2)} $
-                            </span>
-                          </p>
-                          <p className="text-muted-foreground">
-                            ITC estimés : GST{" "}
-                            <span className="font-medium">
-                              {ve.gstItc.toFixed(2)} $
-                            </span>
-                            , QST{" "}
-                            <span className="font-medium">
-                              {ve.qstItc.toFixed(2)} $
-                            </span>
-                          </p>
-                        </div>
+            {showJournalForm && (
+              <VehicleExpenseForm
+                year={selectedYear}
+                vehicleProfiles={vehicleProfiles}
+                initialEntry={editingJournal || undefined}
+                onSubmit={handleJournalSubmit}
+                onCancel={() => {
+                  setShowJournalForm(false);
+                  setEditingJournal(null);
+                }}
+              />
+            )}
+
+            {vehicleJournals.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Aucun journal de déplacements enregistré pour {selectedYear}. Utilise
+                le bouton &laquo; Ajouter une entrée &raquo; pour enregistrer tes km
+                Lyft, stationnements et autres petites dépenses liées au travail.
+              </p>
+            ) : (
+              <div className="space-y-2 text-xs">
+                {vehicleJournals.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-start justify-between gap-3 border border-border rounded-md px-3 py-2 bg-background"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium">{entry.vehicleName}</span>
+                        <span className="text-muted-foreground">
+                          ({entry.periodStart} → {entry.periodEnd})
+                        </span>
                       </div>
+                      <p className="text-muted-foreground">
+                        Km d&apos;affaires :{" "}
+                        <span className="font-medium">
+                          {entry.businessKm.toFixed(0)} km
+                        </span>
+                      </p>
+                      <p className="text-muted-foreground">
+                        Stationnement :{" "}
+                        <span className="font-medium">
+                          {entry.parking.toFixed(2)} $
+                        </span>{" "}
+                        – Autres :{" "}
+                        <span className="font-medium">
+                          {entry.other.toFixed(2)} $
+                        </span>
+                      </p>
+                      <p className="text-muted-foreground">
+                        Dépenses de la période (parking + autres) :{" "}
+                        <span className="font-semibold">
+                          {(
+                            (entry as any).periodTotal ??
+                            (entry.parking || 0) + (entry.other || 0)
+                          ).toFixed(2)}{" "}
+                          $
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
                       <button
-                        onClick={() => handleDeleteVehicleExpense(ve.id)}
+                        className="text-[11px] px-2 py-0.5 rounded-md border border-border hover:bg-muted"
+                        onClick={() => {
+                          setEditingJournal(entry);
+                          setShowJournalForm(true);
+                        }}
+                      >
+                        Modifier
+                      </button>
+                      <button
+                        onClick={() => handleDeleteJournal(entry)}
                         className="text-destructive hover:text-destructive/80"
                         title="Supprimer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       )}
 
       {/* === Onglet BUREAU À DOMICILE === */}
       {activeTab === "homeoffice" && (
-        <div className="space-y-6">
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">
-                Bureau à domicile – périodes et calcul du ratio
-              </h2>
-              <button
-                onClick={() => setShowHomeOfficeForm((v) => !v)}
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border hover:bg-accent"
-              >
-                <Plus className="w-3 h-3" />
-                Ajouter une période
-              </button>
+        <div className="space-y-4">
+          <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+            <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
+              <Home className="w-4 h-4" />
+              Bureau à domicile – {selectedYear}
+            </h2>
+            <p className="text-sm text-muted-foreground mb-2">
+              Résumé des dépenses liées au bureau à domicile basées sur les transactions
+              catégorisées comme &laquo; bureau &raquo; / &laquo; home office &raquo;.
+            </p>
+            <div className="flex justify-between text-sm mt-2">
+              <span className="text-muted-foreground">
+                Total des dépenses identifiées (bureau à domicile):
+              </span>
+              <span className="font-semibold text-emerald-700">
+                {homeOfficeTotal.toFixed(2)} $
+              </span>
             </div>
+          </div>
 
-            {showHomeOfficeForm && (
-              <HomeOfficeForm onSubmit={handleHomeOfficeSubmit} />
-            )}
-
-            {homeOfficeExpenses.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Aucune dépense de bureau à domicile enregistrée pour {selectedYear}.
-              </p>
-            ) : (
-              <div className="space-y-2 text-xs">
-                {homeOfficeExpenses.map((ho) => (
-                  <div
-                    key={ho.id}
-                    className="flex items-start justify-between gap-3 border border-border rounded-md px-3 py-2 bg-background"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">
-                          Période {ho.periodStart} → {ho.periodEnd}
-                        </span>
-                      </div>
-                      <div className="mt-1 space-y-0.5">
-                        <p className="text-muted-foreground">
-                          Ratio affaires (superficie) :{" "}
-                          <span className="font-medium">
-                            {(ho.businessAreaRatio * 100).toFixed(1)}%
-                          </span>
-                        </p>
-                        <p className="text-muted-foreground">
-                          Dépenses totales :{" "}
-                          <span className="font-medium">
-                            {ho.totalExpenses.toFixed(2)} $
-                          </span>
-                        </p>
-                        <p className="text-muted-foreground">
-                          Dépenses admissibles :{" "}
-                          <span className="font-semibold text-emerald-700">
-                            {ho.deductibleTotal.toFixed(2)} $
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteHomeOffice(ho.id)}
-                      className="text-destructive hover:text-destructive/80"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+          {homeOfficeExpenses.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Aucune dépense identifiée comme bureau à domicile pour {selectedYear}. Tu peux
+              utiliser des catégories ou des tags (ex. &laquo; bureau &raquo;,
+              &laquo; homeoffice &raquo;) dans tes transactions pour les faire apparaître ici.
+            </p>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden text-xs">
+              <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted font-semibold">
+                <span>Date</span>
+                <span>Description</span>
+                <span>Catégorie / Tags</span>
+                <span className="text-right">Montant</span>
               </div>
-            )}
-          </section>
+              {homeOfficeExpenses.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="grid grid-cols-4 gap-2 px-3 py-2 border-t border-border/60"
+                >
+                  <span className="truncate">{tx.date}</span>
+                  <span className="truncate">{tx.description || "-"}</span>
+                  <span className="truncate text-muted-foreground">
+                    {tx.category || ""}
+                    {tx.tags && tx.tags.length > 0
+                      ? ` • ${tx.tags.join(", ")}`
+                      : ""}
+                  </span>
+                  <span className="text-right font-medium">
+                    {tx.amount.toFixed(2)} $
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* === Onglet TECHNO === */}
+      {/* === Onglet TECHNOLOGIE === */}
       {activeTab === "tech" && (
-        <div className="space-y-6">
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">
-                Dépenses technologiques – matériel & SaaS
-              </h2>
-              <button
-                onClick={() => setShowTechForm((v) => !v)}
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border hover:bg-accent"
-              >
-                <Plus className="w-3 h-3" />
-                Ajouter une période
-              </button>
+        <div className="space-y-4">
+          <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+            <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
+              <Cpu className="w-4 h-4" />
+              Technologie – {selectedYear}
+            </h2>
+            <p className="text-sm text-muted-foreground mb-2">
+              Résumé des dépenses technologiques (logiciels, abonnements, matériel,
+              services cloud) identifiées dans tes transactions.
+            </p>
+            <div className="flex justify-between text-sm mt-2">
+              <span className="text-muted-foreground">
+                Total des dépenses technologiques:
+              </span>
+              <span className="font-semibold text-emerald-700">
+                {techTotal.toFixed(2)} $
+              </span>
             </div>
+          </div>
 
-            {showTechForm && <TechExpensesForm onSubmit={handleTechSubmit} />}
-
-            {techExpenses.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Aucune dépense techno enregistrée pour {selectedYear}.
-              </p>
-            ) : (
-              <div className="space-y-2 text-xs">
-                {techExpenses.map((te) => (
-                  <div
-                    key={te.id}
-                    className="flex items-start justify-between gap-3 border border-border rounded-md px-3 py-2 bg-background"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">
-                          Période {te.periodStart} → {te.periodEnd}
-                        </span>
-                      </div>
-                      <div className="mt-1 space-y-0.5">
-                        <p className="text-muted-foreground">
-                          Dépenses admissibles :{" "}
-                          <span className="font-semibold text-emerald-700">
-                            {te.deductibleTotal.toFixed(2)} $
-                          </span>
-                        </p>
-                        <p className="text-muted-foreground">
-                          Matériel capitalisable (CCA) :{" "}
-                          <span className="font-medium">
-                            {te.capitalizableHardware.toFixed(2)} $
-                          </span>
-                        </p>
-                        <p className="text-muted-foreground">
-                          Internet affaires :{" "}
-                          <span className="font-medium">
-                            {(te.internetBusinessRatio * 100).toFixed(0)}%
-                          </span>{" "}
-                          – Téléphone :{" "}
-                          <span className="font-medium">
-                            {(te.phoneBusinessRatio * 100).toFixed(0)}%
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteTech(te.id)}
-                      className="text-destructive hover:text-destructive/80"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+          {techExpenses.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Aucune dépense catégorisée comme technologique pour {selectedYear}. Utilise des
+              catégories ou tags (ex. &laquo; tech &raquo;, &laquo; logiciel &raquo;,
+              &laquo; saas &raquo;) dans tes transactions pour les faire apparaître ici.
+            </p>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden text-xs">
+              <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted font-semibold">
+                <span>Date</span>
+                <span>Description</span>
+                <span>Catégorie / Tags</span>
+                <span className="text-right">Montant</span>
               </div>
-            )}
-          </section>
+              {techExpenses.map((tx) => (
+                <div
+                  key={tx.id}
+                  className="grid grid-cols-4 gap-2 px-3 py-2 border-t border-border/60"
+                >
+                  <span className="truncate">{tx.date}</span>
+                  <span className="truncate">{tx.description || "-"}</span>
+                  <span className="truncate text-muted-foreground">
+                    {tx.category || ""}
+                    {tx.tags && tx.tags.length > 0
+                      ? ` • ${tx.tags.join(", ")}`
+                      : ""}
+                  </span>
+                  <span className="text-right font-medium">
+                    {tx.amount.toFixed(2)} $
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </MainLayout>

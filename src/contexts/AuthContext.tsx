@@ -6,6 +6,8 @@ import {
   signOut,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   linkWithCredential,
   EmailAuthProvider,
@@ -20,7 +22,7 @@ import { getApp } from "firebase/app";
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   loading: boolean;
-  signup: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string, usageType?: "business" | "personal" | "both") => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
@@ -48,7 +50,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true);
 
   // Fonction pour créer ou mettre à jour le profil utilisateur dans Firestore
-  const ensureUserProfile = async (user: FirebaseUser) => {
+  const ensureUserProfile = async (user: FirebaseUser, usageType?: "business" | "personal" | "both") => {
     // Obtenir Firestore de manière fiable
     let database = db;
     if (!database) {
@@ -67,12 +69,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     const userRef = doc(database, "users", user.uid);
+    const existingDoc = await getDoc(userRef);
+    const existingData = existingDoc.exists() ? existingDoc.data() : {};
+    
     const newUserData = {
       userId: user.uid,
       email: user.email || "",
       displayName: user.displayName || "",
       photoURL: user.photoURL || "",
-      createdAt: new Date().toISOString(),
+      // Ne mettre à jour usageType que s'il n'existe pas déjà (pour préserver le choix initial)
+      usageType: existingData.usageType || usageType || null,
+      createdAt: existingData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     
@@ -123,6 +130,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return;
     }
 
+    // Vérifier si l'utilisateur revient d'une redirection OAuth
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result) {
+          console.log("✅ Connexion réussie via redirection");
+        }
+      })
+      .catch((error) => {
+        // Ignorer les erreurs de redirection si l'utilisateur n'a pas utilisé cette méthode
+        if (error.code !== "auth/popup-closed-by-user") {
+          console.warn("⚠️ Erreur lors de la vérification de redirection:", error);
+        }
+      });
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       console.log("🔐 onAuthStateChanged déclenché, utilisateur:", user?.uid || "déconnecté");
       setCurrentUser(user);
@@ -166,11 +187,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return unsubscribe;
   }, []);
 
-  const signup = async (email: string, password: string) => {
+  const signup = async (email: string, password: string, usageType?: "business" | "personal" | "both") => {
     if (!auth) {
       throw new Error("Firebase Auth n'est pas initialisé");
     }
-    await createUserWithEmailAndPassword(auth, email, password);
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    // Sauvegarder le type d'utilisation dans le profil utilisateur
+    if (usageType && userCredential.user) {
+      try {
+        await ensureUserProfile(userCredential.user, usageType);
+        console.log("✅ Type d'utilisation sauvegardé:", usageType);
+      } catch (error) {
+        console.error("❌ Erreur lors de la sauvegarde du type d'utilisation:", error);
+        // Ne pas bloquer l'inscription si la sauvegarde du type échoue
+      }
+    }
   };
 
   const login = async (email: string, password: string) => {
@@ -183,22 +214,115 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signInWithGoogle = async () => {
     if (!auth) {
       console.error("❌ Firebase Auth n'est pas initialisé. Vérifiez votre configuration Firebase.");
+      console.error("🔍 Diagnostic:");
+      console.error("   - Vérifiez que toutes les variables VITE_FIREBASE_* sont définies dans .env");
+      console.error("   - Redémarrez le serveur de développement après modification de .env");
+      console.error("   - Utilisez diagnoseAuth() dans la console pour plus de détails");
       throw new Error("Firebase Auth n'est pas initialisé. Vérifiez votre configuration dans .env");
     }
+    
+    // Vérifier que le domaine est valide
+    const currentDomain = window.location.hostname;
+    console.log(`🔍 Tentative de connexion depuis: ${currentDomain}`);
+    
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      // Ajouter des scopes si nécessaire
+      provider.addScope('email');
+      provider.addScope('profile');
+      
+      const currentUrl = window.location.origin;
+      const redirectUri = `${currentUrl}/__/auth/handler`;
+      console.log("🔄 Ouverture de la popup Google...");
+      console.log("📍 URL actuelle:", window.location.href);
+      console.log("📍 URI de redirection attendue:", redirectUri);
+      console.log("💡 Vérifiez dans l'onglet Network (F12) si cette URI correspond à celle dans Google Cloud Console");
+      
+      const result = await signInWithPopup(auth, provider);
+      console.log("✅ Connexion Google réussie");
+      
+      // Vérifier si c'est un nouvel utilisateur et s'il n'a pas de type d'utilisation défini
+      if (result.user && db) {
+        try {
+          const userRef = doc(db, "users", result.user.uid);
+          const userDoc = await getDoc(userRef);
+          if (!userDoc.exists() || !userDoc.data()?.usageType) {
+            // C'est un nouvel utilisateur ou il n'a pas de type d'utilisation
+            // On laissera l'utilisateur le définir plus tard dans les paramètres
+            console.log("ℹ️ Nouvel utilisateur Google - le type d'utilisation pourra être défini dans les paramètres");
+          }
+        } catch (error) {
+          console.warn("⚠️ Impossible de vérifier le type d'utilisation:", error);
+        }
+      }
     } catch (error: any) {
       console.error("❌ Erreur lors de la connexion Google:", error);
-      // Messages d'erreur plus explicites
+      console.error("   Code:", error.code);
+      console.error("   Message:", error.message);
+      console.error("   Détails complets:", error);
+      
+      // Vérifier si c'est vraiment popup-closed-by-user ou si c'est masqué
       if (error.code === "auth/popup-closed-by-user") {
-        throw new Error("La fenêtre de connexion a été fermée. Veuillez réessayer.");
+        console.warn("⚠️ La popup a été fermée. Cela peut être dû à :");
+        console.warn("   1. L'utilisateur a fermé la fenêtre");
+        console.warn("   2. Le navigateur bloque les popups");
+        console.warn("   3. Une erreur redirect_uri_mismatch (vérifiez l'onglet Network)");
+        console.warn("   4. Le domaine n'est pas autorisé");
+        console.warn("💡 Ouvrez l'onglet Network (F12) et cherchez les requêtes vers 'accounts.google.com' pour voir l'erreur réelle");
+      }
+      
+      // Détecter l'erreur redirect_uri_mismatch dans le message
+      const errorMessage = error.message?.toLowerCase() || "";
+      const isRedirectUriMismatch = 
+        errorMessage.includes("redirect_uri_mismatch") ||
+        errorMessage.includes("redirect uri mismatch") ||
+        error.code === "auth/redirect-uri-mismatch";
+      
+      if (isRedirectUriMismatch) {
+        const currentUrl = window.location.origin;
+        const redirectUri = `${currentUrl}/__/auth/handler`;
+        console.error("🔍 URI de redirection utilisée:", redirectUri);
+        throw new Error(
+          `Erreur redirect_uri_mismatch : L'URI de redirection ne correspond pas. ` +
+          `URI utilisée: ${redirectUri}. ` +
+          `Ajoutez cette URI dans Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID > Authorized redirect URIs. ` +
+          `Voir FIX_REDIRECT_URI_MISMATCH.md pour plus de détails.`
+        );
+      }
+      
+      // Messages d'erreur plus explicites avec solutions
+      if (error.code === "auth/popup-closed-by-user") {
+        throw new Error(
+          "La fenêtre de connexion a été fermée. " +
+          "Si cela se produit souvent, votre navigateur peut bloquer les popups. " +
+          "Autorisez les popups pour ce site ou utilisez la méthode de redirection."
+        );
       } else if (error.code === "auth/unauthorized-domain") {
-        throw new Error("Ce domaine n'est pas autorisé. Vérifiez la configuration dans Firebase Console.");
+        const domain = window.location.hostname;
+        throw new Error(
+          `Ce domaine (${domain}) n'est pas autorisé. ` +
+          `Ajoutez-le dans Firebase Console > Authentication > Settings > Authorized domains. ` +
+          `Voir FIX_UNAUTHORIZED_DOMAIN.md pour plus de détails.`
+        );
       } else if (error.code === "auth/operation-not-allowed") {
-        throw new Error("L'authentification Google n'est pas activée. Activez-la dans Firebase Console > Authentication > Sign-in method.");
+        throw new Error(
+          "L'authentification Google n'est pas activée. " +
+          "Activez-la dans Firebase Console > Authentication > Sign-in method > Google."
+        );
       } else if (error.code === "auth/popup-blocked") {
-        throw new Error("La fenêtre popup a été bloquée. Autorisez les popups pour ce site.");
+        throw new Error(
+          "La fenêtre popup a été bloquée. " +
+          "Autorisez les popups pour ce site dans les paramètres de votre navigateur."
+        );
+      } else if (error.code === "auth/network-request-failed") {
+        throw new Error(
+          "Erreur réseau. Vérifiez votre connexion internet et réessayez."
+        );
+      } else if (error.code === "auth/internal-error") {
+        throw new Error(
+          "Erreur interne. Vérifiez la configuration Firebase et réessayez. " +
+          "Utilisez diagnoseAuth() dans la console pour plus de détails."
+        );
       }
       throw error;
     }

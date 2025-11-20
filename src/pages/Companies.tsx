@@ -84,8 +84,9 @@ export default function Companies() {
       }
 
       try {
-        const companiesRef = collection(db, "companies");
-        const q = query(companiesRef, where("userId", "==", currentUser.uid));
+        // Utiliser une sous-collection : users/{userId}/companies
+        const companiesRef = collection(db, "users", currentUser.uid, "companies");
+        const q = query(companiesRef);
         const snapshot = await getDocs(q);
         
         const companiesData: Company[] = [];
@@ -167,7 +168,6 @@ export default function Companies() {
     try {
       const companyData = {
         id: nanoid(),
-        userId: currentUser.uid,
         name: formData.name,
         legalName: formData.legalName || "",
         businessNumber: formData.businessNumber || "",
@@ -182,7 +182,8 @@ export default function Companies() {
         updatedAt: new Date().toISOString(),
       };
 
-      const companiesRef = collection(db, "companies");
+      // Utiliser une sous-collection : users/{userId}/companies
+      const companiesRef = collection(db, "users", currentUser.uid, "companies");
       await addDoc(companiesRef, companyData);
       
       console.log("✅ Entreprise créée avec succès");
@@ -228,7 +229,8 @@ export default function Companies() {
     }
 
     try {
-      const companyRef = doc(db, "companies", companyId);
+      // Utiliser une sous-collection : users/{userId}/companies
+      const companyRef = doc(db, "users", currentUser.uid, "companies", companyId);
       await deleteDoc(companyRef);
       
       // Rafraîchir la liste

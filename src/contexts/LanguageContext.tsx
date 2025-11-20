@@ -121,6 +121,10 @@ const translations = {
     
     // Settings - Account
     "settings.accountSettings": "Paramètres du compte",
+    "settings.profilePhoto": "Photo de profil",
+    "settings.uploadPhoto": "Télécharger une photo",
+    "settings.changePhoto": "Changer la photo",
+    "settings.photoHint": "Formats acceptés: JPG, PNG, GIF. Taille max: 5MB",
     "settings.fullName": "Nom complet",
     "settings.email": "Email",
     "settings.phone": "Téléphone",
@@ -384,6 +388,10 @@ const translations = {
     
     // Settings - Account
     "settings.accountSettings": "Account Settings",
+    "settings.profilePhoto": "Profile Photo",
+    "settings.uploadPhoto": "Upload Photo",
+    "settings.changePhoto": "Change Photo",
+    "settings.photoHint": "Accepted formats: JPG, PNG, GIF. Max size: 5MB",
     "settings.fullName": "Full Name",
     "settings.email": "Email",
     "settings.phone": "Phone",

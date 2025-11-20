@@ -7,10 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 
+type UsageType = "business" | "personal" | "both" | "";
+
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignup, setIsSignup] = useState(false);
+  const [usageType, setUsageType] = useState<UsageType>("");
   const [loading, setLoading] = useState(false);
   const { login, signup, signInWithGoogle } = useAuth();
   const { toast } = useToast();
@@ -18,11 +21,21 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSignup && !usageType) {
+      toast({
+        title: "Information requise",
+        description: "Veuillez sélectionner l'utilisation de Nova Finance.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setLoading(true);
 
     try {
       if (isSignup) {
-        await signup(email, password);
+        await signup(email, password, usageType as "business" | "personal" | "both");
         toast({
           title: "Compte créé",
           description: "Votre compte a été créé avec succès.",
@@ -49,6 +62,7 @@ export default function Login() {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
+      // Pour l'inscription Google, on demandera l'usage après la connexion
       await signInWithGoogle();
       toast({
         title: "Connexion réussie",
@@ -143,6 +157,53 @@ export default function Login() {
                 minLength={6}
               />
             </div>
+            
+            {isSignup && (
+              <div className="space-y-2">
+                <Label htmlFor="usageType">
+                  Vous désirez utiliser Nova Finance pour :
+                </Label>
+                <div className="space-y-2">
+                  <label className="flex items-center space-x-2 cursor-pointer p-2 rounded-md border border-border hover:bg-muted/50">
+                    <input
+                      type="radio"
+                      name="usageType"
+                      value="business"
+                      checked={usageType === "business"}
+                      onChange={(e) => setUsageType(e.target.value as UsageType)}
+                      className="w-4 h-4"
+                      disabled={loading}
+                    />
+                    <span className="text-sm">Votre entreprise</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer p-2 rounded-md border border-border hover:bg-muted/50">
+                    <input
+                      type="radio"
+                      name="usageType"
+                      value="personal"
+                      checked={usageType === "personal"}
+                      onChange={(e) => setUsageType(e.target.value as UsageType)}
+                      className="w-4 h-4"
+                      disabled={loading}
+                    />
+                    <span className="text-sm">Vos finances personnelles</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer p-2 rounded-md border border-border hover:bg-muted/50">
+                    <input
+                      type="radio"
+                      name="usageType"
+                      value="both"
+                      checked={usageType === "both"}
+                      onChange={(e) => setUsageType(e.target.value as UsageType)}
+                      className="w-4 h-4"
+                      disabled={loading}
+                    />
+                    <span className="text-sm">Les deux</span>
+                  </label>
+                </div>
+              </div>
+            )}
+            
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Chargement..." : isSignup ? "Créer un compte" : "Se connecter"}
             </Button>
@@ -151,7 +212,10 @@ export default function Login() {
           <div className="text-center text-sm">
             <button
               type="button"
-              onClick={() => setIsSignup(!isSignup)}
+              onClick={() => {
+                setIsSignup(!isSignup);
+                setUsageType(""); // Réinitialiser le choix lors du changement de mode
+              }}
               className="text-primary hover:underline"
               disabled={loading}
             >

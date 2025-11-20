@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { Save, Shield, Bell, Palette, Users, CreditCard, Globe, LogOut, AlertCircle, KeyRound, Settings2, Download, Trash2, Plus, X } from "lucide-react";
+import { Save, Shield, Bell, Palette, Users, CreditCard, Globe, LogOut, AlertCircle, KeyRound, Settings2, Download, Trash2, Plus, X, Upload, User } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
+import { useUsageMode } from "../contexts/UsageModeContext";
 import { useNavigate } from "react-router-dom";
 import { db, auth } from "../lib/firebase";
 import { collection, getDocs, query, where, deleteDoc, doc, setDoc, getDoc } from "firebase/firestore";
+import { updateProfile } from "firebase/auth";
+import { uploadProfilePhoto, deleteProfilePhoto } from "../lib/storage";
+import { migrateAllData } from "../lib/migration";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +42,7 @@ authenticator.options = {
 export default function Settings() {
   const { language, setLanguage, t } = useLanguage();
   const { currentUser, logout, linkEmailPassword, linkGoogleAccount, deleteAccount } = useAuth();
+  const { usageType, updateUsageType } = useUsageMode();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("general");
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
@@ -61,6 +66,12 @@ export default function Settings() {
   const [paymentMethods, setPaymentMethods] = useState<Array<{ id: string; type: string; label: string; last4?: string; expiryDate?: string }>>([]);
   const [showAddPaymentMethod, setShowAddPaymentMethod] = useState(false);
   const [selectedPaymentType, setSelectedPaymentType] = useState<string>("");
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+  const [profileImageError, setProfileImageError] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [isUpdatingUsageType, setIsUpdatingUsageType] = useState(false);
+  const [usageTypeError, setUsageTypeError] = useState("");
 
   const isGoogleAccount = currentUser?.providerData?.some(
     (provider) => provider.providerId === "google.com"
@@ -147,9 +158,9 @@ export default function Settings() {
 
       // Récupérer toutes les transactions
       try {
-        const transactionsRef = collection(db, "transactions");
-        const transactionsQuery = query(transactionsRef, where("userId", "==", userId));
-        const transactionsSnapshot = await getDocs(transactionsQuery);
+        // Utiliser une sous-collection : users/{userId}/transactions
+        const transactionsRef = collection(db, "users", userId, "transactions");
+        const transactionsSnapshot = await getDocs(transactionsRef);
         allData.transactions = transactionsSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
@@ -160,9 +171,9 @@ export default function Settings() {
 
       // Récupérer toutes les entreprises
       try {
-        const companiesRef = collection(db, "companies");
-        const companiesQuery = query(companiesRef, where("userId", "==", userId));
-        const companiesSnapshot = await getDocs(companiesQuery);
+        // Utiliser une sous-collection : users/{userId}/companies
+        const companiesRef = collection(db, "users", userId, "companies");
+        const companiesSnapshot = await getDocs(companiesRef);
         allData.companies = companiesSnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
@@ -209,11 +220,11 @@ export default function Settings() {
 
       // Supprimer toutes les transactions
       try {
-        const transactionsRef = collection(db, "transactions");
-        const transactionsQuery = query(transactionsRef, where("userId", "==", userId));
-        const transactionsSnapshot = await getDocs(transactionsQuery);
+        // Utiliser une sous-collection : users/{userId}/transactions
+        const transactionsRef = collection(db, "users", userId, "transactions");
+        const transactionsSnapshot = await getDocs(transactionsRef);
         const deletePromises = transactionsSnapshot.docs.map((docSnapshot) =>
-          deleteDoc(doc(db, "transactions", docSnapshot.id))
+          deleteDoc(doc(db, "users", userId, "transactions", docSnapshot.id))
         );
         await Promise.all(deletePromises);
       } catch (error) {
@@ -222,11 +233,11 @@ export default function Settings() {
 
       // Supprimer toutes les entreprises
       try {
-        const companiesRef = collection(db, "companies");
-        const companiesQuery = query(companiesRef, where("userId", "==", userId));
-        const companiesSnapshot = await getDocs(companiesQuery);
+        // Utiliser une sous-collection : users/{userId}/companies
+        const companiesRef = collection(db, "users", userId, "companies");
+        const companiesSnapshot = await getDocs(companiesRef);
         const deletePromises = companiesSnapshot.docs.map((docSnapshot) =>
-          deleteDoc(doc(db, "companies", docSnapshot.id))
+          deleteDoc(doc(db, "users", userId, "companies", docSnapshot.id))
         );
         await Promise.all(deletePromises);
       } catch (error) {
@@ -249,6 +260,11 @@ export default function Settings() {
       setDeleteConfirmText("");
     }
   };
+
+  // Réinitialiser l'erreur d'image quand la photoURL change
+  useEffect(() => {
+    setProfileImageError(false);
+  }, [currentUser?.photoURL]);
 
   // Charger l'état du 2FA depuis Firestore
   useEffect(() => {
@@ -379,6 +395,79 @@ export default function Settings() {
       googlepay: "Google Pay",
     };
     return labels[type] || type;
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    // Vérifier que c'est une image
+    if (!file.type.startsWith('image/')) {
+      setPhotoError("Le fichier doit être une image");
+      return;
+    }
+
+    // Vérifier la taille (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError("L'image ne doit pas dépasser 5MB");
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    setPhotoError("");
+
+    try {
+      // Sauvegarder l'ancienne photo URL pour la supprimer après
+      const oldPhotoURL = currentUser.photoURL;
+
+      console.log("📤 Début de l'upload de la photo de profil...");
+      
+      // Uploader la nouvelle photo
+      const newPhotoURL = await uploadProfilePhoto(file);
+      
+      if (!newPhotoURL) {
+        throw new Error("Erreur lors de l'upload de la photo. Vérifiez la console pour plus de détails.");
+      }
+
+      console.log("✅ Photo uploadée, mise à jour du profil...");
+
+      // Mettre à jour le profil utilisateur
+      await updateProfile(currentUser, {
+        photoURL: newPhotoURL
+      });
+
+      console.log("✅ Profil mis à jour avec succès");
+
+      // Supprimer l'ancienne photo si elle existe et vient de Firebase Storage
+      if (oldPhotoURL) {
+        console.log("🗑️ Suppression de l'ancienne photo...");
+        await deleteProfilePhoto(oldPhotoURL);
+      }
+
+      // Réinitialiser l'erreur d'image et recharger la page pour mettre à jour l'affichage
+      setProfileImageError(false);
+      alert("✅ Photo de profil mise à jour avec succès !");
+      window.location.reload();
+    } catch (error: any) {
+      console.error("❌ Erreur lors de la mise à jour de la photo de profil:", error);
+      console.error("❌ Code d'erreur:", error?.code);
+      console.error("❌ Message:", error?.message);
+      
+      let errorMessage = "Erreur lors de la mise à jour de la photo de profil";
+      if (error?.code === 'storage/unauthorized') {
+        errorMessage = "Vous n'avez pas l'autorisation d'uploader cette photo. Vérifiez les règles de sécurité Firebase Storage.";
+      } else if (error?.code === 'storage/quota-exceeded') {
+        errorMessage = "Le quota de stockage est dépassé.";
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      setPhotoError(errorMessage);
+    } finally {
+      setIsUploadingPhoto(false);
+      // Réinitialiser l'input
+      e.target.value = "";
+    }
   };
 
   const getPaymentMethodIcon = (type: string) => {
@@ -632,6 +721,192 @@ export default function Settings() {
                   {t("settings.accountSettings")}
                 </h2>
                 <div className="space-y-6">
+                  {/* Type d'utilisation */}
+                  <div>
+                    <label className="text-sm font-medium text-foreground block mb-2">
+                      Type d'utilisation de Nova Finance
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Choisissez comment vous utilisez Nova Finance. Vous pouvez modifier ce choix à tout moment.
+                    </p>
+                    <div className="space-y-3">
+                      <label className="flex items-center space-x-3 cursor-pointer p-4 rounded-lg border border-border hover:bg-secondary/50 transition-colors">
+                        <input
+                          type="radio"
+                          name="usageType"
+                          value="business"
+                          checked={usageType === "business"}
+                          onChange={async () => {
+                            if (usageType === "business") return;
+                            setIsUpdatingUsageType(true);
+                            setUsageTypeError("");
+                            try {
+                              await updateUsageType("business");
+                              alert("✅ Type d'utilisation mis à jour avec succès ! La page va se recharger.");
+                              window.location.reload();
+                            } catch (error: any) {
+                              setUsageTypeError(error.message || "Erreur lors de la mise à jour");
+                            } finally {
+                              setIsUpdatingUsageType(false);
+                            }
+                          }}
+                          disabled={isUpdatingUsageType}
+                          className="w-4 h-4"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm font-medium text-foreground">Votre entreprise</span>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Gestion financière pour votre entreprise
+                          </p>
+                        </div>
+                      </label>
+                      <label className="flex items-center space-x-3 cursor-pointer p-4 rounded-lg border border-border hover:bg-secondary/50 transition-colors">
+                        <input
+                          type="radio"
+                          name="usageType"
+                          value="personal"
+                          checked={usageType === "personal"}
+                          onChange={async () => {
+                            if (usageType === "personal") return;
+                            setIsUpdatingUsageType(true);
+                            setUsageTypeError("");
+                            try {
+                              await updateUsageType("personal");
+                              alert("✅ Type d'utilisation mis à jour avec succès ! La page va se recharger.");
+                              window.location.reload();
+                            } catch (error: any) {
+                              setUsageTypeError(error.message || "Erreur lors de la mise à jour");
+                            } finally {
+                              setIsUpdatingUsageType(false);
+                            }
+                          }}
+                          disabled={isUpdatingUsageType}
+                          className="w-4 h-4"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm font-medium text-foreground">Vos finances personnelles</span>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Gestion financière personnelle
+                          </p>
+                        </div>
+                      </label>
+                      <label className="flex items-center space-x-3 cursor-pointer p-4 rounded-lg border border-border hover:bg-secondary/50 transition-colors">
+                        <input
+                          type="radio"
+                          name="usageType"
+                          value="both"
+                          checked={usageType === "both"}
+                          onChange={async () => {
+                            if (usageType === "both") return;
+                            setIsUpdatingUsageType(true);
+                            setUsageTypeError("");
+                            try {
+                              await updateUsageType("both");
+                              alert("✅ Type d'utilisation mis à jour avec succès ! La page va se recharger.");
+                              window.location.reload();
+                            } catch (error: any) {
+                              setUsageTypeError(error.message || "Erreur lors de la mise à jour");
+                            } finally {
+                              setIsUpdatingUsageType(false);
+                            }
+                          }}
+                          disabled={isUpdatingUsageType}
+                          className="w-4 h-4"
+                        />
+                        <div className="flex-1">
+                          <span className="text-sm font-medium text-foreground">Les deux</span>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Gestion financière pour votre entreprise et vos finances personnelles
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                    {usageTypeError && (
+                      <p className="text-xs text-destructive mt-2">{usageTypeError}</p>
+                    )}
+                    {isUpdatingUsageType && (
+                      <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <span>Mise à jour en cours...</span>
+                      </div>
+                    )}
+                    {usageType && (
+                      <div className="mt-3 p-3 border border-primary/50 rounded-lg bg-primary/10">
+                        <p className="text-xs text-foreground">
+                          <strong>Type actuel :</strong> {
+                            usageType === "business" ? "Entreprise" :
+                            usageType === "personal" ? "Finance personnelle" :
+                            "Les deux"
+                          }
+                        </p>
+                        {usageType === "both" && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Vous pouvez basculer entre les deux modes depuis la sidebar.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Photo de profil */}
+                  <div>
+                    <label className="text-sm font-medium text-foreground block mb-2">
+                      {t("settings.profilePhoto") || "Photo de profil"}
+                    </label>
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        {currentUser?.photoURL && !profileImageError ? (
+                          <img
+                            src={currentUser.photoURL}
+                            alt={currentUser.displayName || "Profil"}
+                            className="w-20 h-20 rounded-full object-cover border-2 border-border"
+                            onError={() => setProfileImageError(true)}
+                          />
+                        ) : (
+                          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 border-2 border-border flex items-center justify-center">
+                            <User className="w-10 h-10 text-primary" />
+                          </div>
+                        )}
+                        {isUploadingPhoto && (
+                          <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+                            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <label
+                          htmlFor="profile-photo-upload"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isUploadingPhoto ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"></div>
+                              <span>Upload en cours...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4" />
+                              <span>{currentUser?.photoURL ? t("settings.changePhoto") || "Changer la photo" : t("settings.uploadPhoto") || "Télécharger une photo"}</span>
+                            </>
+                          )}
+                        </label>
+                        <input
+                          id="profile-photo-upload"
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoUpload}
+                          disabled={isUploadingPhoto}
+                          className="hidden"
+                        />
+                        {photoError && (
+                          <p className="text-xs text-destructive mt-2">{photoError}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {t("settings.photoHint") || "Formats acceptés: JPG, PNG, GIF. Taille max: 5MB"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                   <div>
                     <label htmlFor="account-full-name" className="text-sm font-medium text-foreground block mb-2">
                       {t("settings.fullName")}
@@ -1237,6 +1512,65 @@ export default function Settings() {
 
                   {currentUser && (
                     <>
+                      <div className="pt-6 border-t border-border">
+                        <h3 className="text-lg font-semibold text-foreground mb-4">
+                          Migration des données
+                        </h3>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Migrez vos anciennes données vers la nouvelle structure organisée par utilisateur.
+                        </p>
+                        <button
+                          onClick={async () => {
+                            if (!confirm("Voulez-vous migrer toutes vos données vers la nouvelle structure ? Cette opération peut prendre quelques instants.")) {
+                              return;
+                            }
+                            setIsMigrating(true);
+                            try {
+                              console.log("🚀 Démarrage de la migration...");
+                              const result = await migrateAllData();
+                              console.log("📊 Résultat de la migration:", result);
+                              
+                              let message = `✅ Migration terminée !\n\n`;
+                              message += `Transactions: ${result.transactions.migrated} migrée(s)\n`;
+                              message += `Entreprises: ${result.companies.migrated} migrée(s)\n`;
+                              message += `Dépenses véhicule: ${result.vehicleExpenses.migrated} migrée(s)\n`;
+                              message += `Profils annuels: ${result.vehicleAnnualProfiles.migrated} migré(s)\n`;
+                              message += `Bureau à domicile: ${result.homeOfficeExpenses.migrated} migrée(s)\n`;
+                              message += `Dépenses techno: ${result.techExpenses.migrated} migrée(s)\n`;
+                              message += `Actifs: ${result.assets.migrated} migré(s)\n\n`;
+                              message += `Total: ${result.total.migrated} document(s) migré(s)`;
+                              if (result.total.errors > 0) {
+                                message += `\n${result.total.errors} erreur(s)`;
+                              }
+                              
+                              alert(message);
+                              window.location.reload();
+                            } catch (error: any) {
+                              console.error("❌ Erreur lors de la migration:", error);
+                              console.error("❌ Code:", error?.code);
+                              console.error("❌ Message:", error?.message);
+                              alert(`❌ Erreur lors de la migration:\n${error.message || error.toString()}\n\nVérifiez la console pour plus de détails.`);
+                            } finally {
+                              setIsMigrating(false);
+                            }
+                          }}
+                          disabled={isMigrating}
+                          className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isMigrating ? (
+                            <>
+                              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                              <span>Migration en cours...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-5 h-5" />
+                              <span>Migrer mes données</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
                       <div className="pt-6 border-t border-border">
                         <h3 className="text-lg font-semibold text-foreground mb-4">
                           Télécharger vos données

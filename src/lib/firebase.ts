@@ -1,7 +1,7 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getAnalytics, type Analytics } from "firebase/analytics";
-import { getFirestore, type Firestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { initializeFirestore, getFirestore, type Firestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAuth, type Auth } from "firebase/auth";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
@@ -83,20 +83,17 @@ if (hasAllRequiredValues) {
     // Initialize Firestore
     if (app) {
       try {
-        db = getFirestore(app);
-        console.log("✅ Firestore initialisé avec succès");
-        
-        // Activer la persistance hors ligne (uniquement dans le navigateur)
+        // Utiliser la nouvelle méthode de cache avec persistance (recommandée)
         if (typeof window !== "undefined") {
-          enableIndexedDbPersistence(db).catch((err: any) => {
-            if (err.code === 'failed-precondition') {
-              console.warn("⚠️ Persistance Firestore: plusieurs onglets ouverts, seule la persistance est activée dans un seul onglet");
-            } else if (err.code === 'unimplemented') {
-              console.warn("⚠️ Persistance Firestore: le navigateur ne supporte pas toutes les fonctionnalités requises");
-            } else {
-              console.warn("⚠️ Persistance Firestore non activée:", err);
-            }
+          db = initializeFirestore(app, {
+            localCache: persistentLocalCache({
+              tabManager: persistentMultipleTabManager(),
+            }),
           });
+          console.log("✅ Firestore initialisé avec succès (cache persistant activé)");
+        } else {
+          db = getFirestore(app);
+          console.log("✅ Firestore initialisé avec succès");
         }
       } catch (firestoreError: any) {
         console.error("❌ Firestore n'a pas pu être initialisé:", firestoreError);
@@ -110,6 +107,14 @@ if (hasAllRequiredValues) {
         console.log("✅ Firebase Auth initialisé avec succès");
       } catch (authError) {
         console.error("❌ Auth n'a pas pu être initialisé:", authError);
+      }
+      
+      // Initialize Storage
+      try {
+        storage = getStorage(app);
+        console.log("✅ Firebase Storage initialisé avec succès");
+      } catch (storageError) {
+        console.error("❌ Storage n'a pas pu être initialisé:", storageError);
       }
     }
     

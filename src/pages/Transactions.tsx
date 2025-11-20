@@ -53,8 +53,9 @@ export default function Transactions() {
       }
 
       try {
-        const companiesRef = collection(db, "companies");
-        const q = query(companiesRef, where("userId", "==", currentUser.uid));
+        // Utiliser une sous-collection : users/{userId}/companies
+        const companiesRef = collection(db, "users", currentUser.uid, "companies");
+        const q = query(companiesRef);
         const snapshot = await getDocs(q);
         
         const companiesData: Array<{ id: string; name: string }> = [];

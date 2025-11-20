@@ -9,8 +9,10 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import { AuthProvider } from "./contexts/AuthContext";
 import { FiscalYearProvider } from "./contexts/FiscalYearContext";
+import { UsageModeProvider } from "./contexts/UsageModeContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./lib/firebase"; // Initialize Firebase
+import "./utils/authDiagnostic"; // Import diagnostic utility
 import Dashboard from "./pages/Dashboard";
 import Companies from "./pages/Companies";
 import Transactions from "./pages/Transactions";
@@ -20,6 +22,10 @@ import Settings from "./pages/Settings";
 import Accounting from "./pages/Accounting";
 import Anomalies from "./pages/Anomalies";
 import Assets from "./pages/Assets";
+import Budget from "./pages/Budget";
+import Accounts from "./pages/Accounts";
+import Cards from "./pages/Cards";
+import Savings from "./pages/Savings";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -29,8 +35,9 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <LanguageProvider>
       <AuthProvider>
-        <FiscalYearProvider>
-          <TooltipProvider>
+        <UsageModeProvider>
+          <FiscalYearProvider>
+            <TooltipProvider>
           <Toaster />
           <Sonner />
           <BrowserRouter
@@ -113,12 +120,45 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/budget"
+                element={
+                  <ProtectedRoute>
+                    <Budget />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/accounts"
+                element={
+                  <ProtectedRoute>
+                    <Accounts />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/cards"
+                element={
+                  <ProtectedRoute>
+                    <Cards />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/savings"
+                element={
+                  <ProtectedRoute>
+                    <Savings />
+                  </ProtectedRoute>
+                }
+              />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
         </TooltipProvider>
         </FiscalYearProvider>
+        </UsageModeProvider>
       </AuthProvider>
     </LanguageProvider>
   </QueryClientProvider>
