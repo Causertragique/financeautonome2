@@ -4,6 +4,7 @@ import { Plus, Filter, Download, Edit2, Trash2, Search, Calendar, X, Printer, Do
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useFiscalYearContext } from "../contexts/FiscalYearContext";
+import { useUsageMode } from "../contexts/UsageModeContext";
 import { getTransactions, addTransaction, updateTransaction, deleteTransaction, type Transaction } from "../lib/db";
 import { db } from "../lib/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
@@ -15,6 +16,7 @@ export default function Transactions() {
   const { t } = useLanguage();
   const { currentUser } = useAuth();
   const { selectedYear } = useFiscalYearContext();
+  const { usageType, currentMode } = useUsageMode();
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">(
@@ -29,6 +31,15 @@ export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  
+  // Cache pour les transactions des deux modes
+  const [transactionsCache, setTransactionsCache] = useState<{
+    business: Transaction[];
+    personal: Transaction[];
+  }>({
+    business: [],
+    personal: [],
+  });
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [sortColumn, setSortColumn] = useState<"date" | "company" | "category" | "tags" | "amount" | null>(null);
@@ -76,16 +87,34 @@ export default function Transactions() {
     loadCompanies();
   }, [currentUser]);
 
-  // Charger les transactions depuis la base de données
+  // Charger les transactions dans le cache pour les deux modes (si usageType === "both")
   useEffect(() => {
     const loadTransactions = async () => {
       setLoading(true);
       console.log("🔄 Chargement des transactions pour l'année:", selectedYear);
       try {
-        const data = await getTransactions(selectedYear);
-        console.log("📊 Transactions chargées:", data.length);
-        console.log("📋 Liste des transactions:", data);
+        if (usageType === "both") {
+          // Charger les deux modes en parallèle
+          const [businessData, personalData] = await Promise.all([
+            getTransactions(selectedYear, "business"),
+            getTransactions(selectedYear, "personal"),
+          ]);
+          
+          const newCache = {
+            business: businessData,
+            personal: personalData,
+          };
+          
+          setTransactionsCache(newCache);
+          
+          // Afficher les transactions du mode actuel
+          setTransactions(newCache[currentMode]);
+        } else {
+          // Si un seul mode, charger normalement
+          const mode = usageType || "business";
+          const data = await getTransactions(selectedYear, mode);
         setTransactions(data);
+        }
       } catch (error) {
         console.error("❌ Erreur lors du chargement des transactions:", error);
         setTransactions([]);
@@ -106,7 +135,14 @@ export default function Transactions() {
     return () => {
       window.removeEventListener("transactionsUpdated", handleUpdate);
     };
-  }, [selectedYear]);
+  }, [selectedYear, usageType]);
+
+  // Quand le mode change (pour usageType === "both"), basculer instantanément depuis le cache
+  useEffect(() => {
+    if (usageType === "both" && currentUser) {
+      setTransactions(transactionsCache[currentMode]);
+    }
+  }, [currentMode, usageType, transactionsCache, currentUser]);
   
   // Catégories par défaut avec traductions
   const defaultCategories = [

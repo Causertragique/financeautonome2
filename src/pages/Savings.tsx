@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
 import { Plus, PiggyBank, TrendingUp, Target, Calendar, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+// Composant ProgressBar sans style inline
+const ProgressBar = ({ progress, className = "" }: { progress: number; className?: string }) => {
+  const barRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (barRef.current) {
+      barRef.current.style.setProperty("--progress-width", `${Math.min(progress, 100)}%`);
+    }
+  }, [progress]);
+  
+  return (
+    <div
+      ref={barRef}
+      className={`h-2 rounded-full transition-all progress-bar ${className}`}
+    />
+  );
+};
 
 // Produits d'épargne courants au Québec
 const savingsTypes = [
@@ -215,10 +233,7 @@ export default function Savings() {
                           <p className="text-sm font-medium">{progress.toFixed(0)}%</p>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2">
-                          <div
-                            className="h-2 rounded-full bg-success transition-all"
-                            style={{ width: `${Math.min(progress, 100)}%` }}
-                          />
+                          <ProgressBar progress={Math.min(progress, 100)} className="bg-success" />
                         </div>
                       </div>
 
@@ -231,11 +246,11 @@ export default function Savings() {
                             <p className="text-sm font-medium">{contributionProgress.toFixed(0)}%</p>
                           </div>
                           <div className="w-full bg-muted rounded-full h-2">
-                            <div
-                              className={`h-2 rounded-full transition-all ${
+                            <ProgressBar
+                              progress={Math.min(contributionProgress, 100)}
+                              className={
                                 contributionProgress >= 100 ? "bg-destructive" : contributionProgress > 80 ? "bg-warning" : "bg-primary"
-                              }`}
-                              style={{ width: `${Math.min(contributionProgress, 100)}%` }}
+                              }
                             />
                           </div>
                         </div>
@@ -279,7 +294,7 @@ export default function Savings() {
             </div>
             <div>
               <Label htmlFor="saving-type">Type de compte</Label>
-              <select id="saving-type" className="w-full px-3 py-2 border rounded-lg">
+              <select id="saving-type" aria-label="Type de compte" className="w-full px-3 py-2 border rounded-lg">
                 {savingsTypes.map((type) => (
                   <option key={type.value} value={type.value}>
                     {type.icon} {type.label}

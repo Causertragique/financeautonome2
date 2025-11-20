@@ -68,6 +68,29 @@ function getCurrentMode(): "business" | "personal" {
 }
 
 /**
+ * Convertit le mode en nom de collection française
+ */
+function getModeCollectionName(mode: "business" | "personal"): "entreprise" | "personnelle" {
+  return mode === "business" ? "entreprise" : "personnelle";
+}
+
+/**
+ * Obtient la référence de collection basée sur userId et mode
+ */
+function getCollectionRef(collectionName: string, userId: string, mode: "business" | "personal") {
+  const modeName = getModeCollectionName(mode);
+  return collection(db, "Users", userId, modeName, collectionName);
+}
+
+/**
+ * Obtient la référence de document basée sur userId et mode
+ */
+function getDocRef(collectionName: string, userId: string, mode: "business" | "personal", docId: string) {
+  const modeName = getModeCollectionName(mode);
+  return doc(db, "Users", userId, modeName, collectionName, docId);
+}
+
+/**
  * Récupère les transactions pour une année donnée, filtrées par mode
  */
 export async function getTransactions(year: number, mode?: "business" | "personal"): Promise<Transaction[]> {
@@ -96,71 +119,43 @@ export async function getTransactions(year: number, mode?: "business" | "persona
     const currentMode = mode || getCurrentMode();
     console.log("🔍 Mode de filtrage:", currentMode);
 
-    // Essayer d'abord la collection racine (legacy)
-    let transactionsRef = collection(db, "transactions");
-    let snapshot;
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/transactions
+    const transactionsRef = getCollectionRef("transactions", userId, currentMode);
+    let allDocs: any[] = [];
     
     try {
+      // Récupérer les transactions de la sous-collection avec tri par date
       const q = query(
         transactionsRef,
-        where("userId", "==", userId),
-        where("mode", "==", currentMode),
         orderBy("date", "desc")
       );
-      snapshot = await getDocs(q);
-      console.log("📊 Transactions trouvées dans collection racine:", snapshot.size);
+      const snapshot = await getDocs(q);
+      allDocs = [...snapshot.docs];
+      console.log("📊 Transactions trouvées dans sous-collection:", snapshot.size);
     } catch (orderByError: any) {
       console.warn("⚠️ Erreur avec orderBy, récupération sans tri:", orderByError?.code);
       if (orderByError?.code === "failed-precondition") {
         console.warn("⚠️ Index Firestore manquant. Récupération sans orderBy…");
         console.warn(
-          "💡 Créez un index composite sur: collection=transactions, fields=userId (Ascending), mode (Ascending), date (Descending)"
+          "💡 Créez un index composite sur: collection=Users/{userId}/{mode}/transactions, fields=date (Descending)"
         );
       }
-      const q = query(
-        transactionsRef, 
-        where("userId", "==", userId),
-        where("mode", "==", currentMode)
-      );
-      snapshot = await getDocs(q);
+      const q = query(transactionsRef);
+      const snapshot = await getDocs(q);
+      allDocs = [...snapshot.docs];
       console.log("📊 Transactions trouvées (sans orderBy):", snapshot.size);
     }
 
-    // Si aucune transaction trouvée, essayer la sous-collection
-    if (snapshot.size === 0) {
-      console.log("🔍 Aucune transaction dans la collection racine, vérification de la sous-collection...");
-      try {
-        transactionsRef = collection(db, "users", userId, "transactions");
-        const q = query(
-          transactionsRef,
-          where("mode", "==", currentMode),
-          orderBy("date", "desc")
-        );
-        snapshot = await getDocs(q);
-        console.log("📊 Transactions trouvées dans sous-collection:", snapshot.size);
-      } catch (subCollectionError: any) {
-        console.warn("⚠️ Erreur avec la sous-collection:", subCollectionError?.code);
-        if (subCollectionError?.code === "failed-precondition") {
-          const q = query(
-            transactionsRef,
-            where("mode", "==", currentMode)
-          );
-          snapshot = await getDocs(q);
-          console.log("📊 Transactions trouvées (sans orderBy):", snapshot.size);
-        }
-      }
-    }
-
-    console.log("📊 Nombre total de documents récupérés:", snapshot.size);
+    console.log("📊 Nombre total de documents récupérés:", allDocs.length);
 
     const transactions: Transaction[] = [];
 
-    snapshot.forEach((d) => {
+    allDocs.forEach((d) => {
       const data = d.data() as any;
-      console.log("📄 Transaction trouvée:", d.id, "Date:", data.date, "Mode:", data.mode);
+      console.log("📄 Transaction trouvée:", d.id, "Date:", data.date);
 
-      // Filtrer par mode et par date
-      if (data.date >= startDate && data.date <= endDate && data.mode === currentMode) {
+      // Vérifier que la transaction est dans la période
+      if (data.date >= startDate && data.date <= endDate) {
         const transaction = {
           id: d.id,
           ...data,
@@ -194,7 +189,7 @@ export async function getTransactions(year: number, mode?: "business" | "persona
 
     console.log("✅ Nombre de transactions retournées:", transactions.length);
     
-    if (snapshot.size > 0 && transactions.length === 0) {
+    if (allDocs.length > 0 && transactions.length === 0) {
       console.warn("⚠️ Des transactions existent mais aucune ne correspond à l'année", year);
       console.warn("⚠️ Vérifiez que les dates des transactions sont dans la plage:", startDate, "à", endDate);
     }
@@ -283,15 +278,17 @@ export async function addTransaction(
 
     console.log("📄 Données complètes de la transaction:", transactionData);
 
-    const transactionRef = doc(db, "transactions", id);
-    console.log("🔄 Chemin du document:", `transactions/${id}`);
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/transactions
+    const transactionRef = getDocRef("transactions", userId, currentMode, id);
+    const pathString = `Users/${userId}/${getModeCollectionName(currentMode)}/transactions/${id}`;
+    console.log("🔄 Chemin du document:", pathString);
     console.log("🔄 Exécution de setDoc()…");
 
     await setDoc(transactionRef, transactionData);
     console.log("✅ Transaction créée avec succès dans Firestore");
 
     try {
-      const verifyRef = doc(db, "transactions", id);
+      const verifyRef = getDocRef("transactions", userId, currentMode, id);
       const verifyDoc = await getDoc(verifyRef);
       if (verifyDoc.exists()) {
         console.log("✅ Transaction vérifiée et confirmée dans Firestore");
@@ -347,10 +344,21 @@ export async function updateTransaction(
       return false;
     }
 
-    const transactionRef = doc(db, "transactions", transactionId);
-    const transactionDoc = await getDoc(transactionRef);
+    // Chercher la transaction dans les deux sous-collections (personnelle et entreprise)
+    let transactionDoc: any = null;
+    let transactionRef: any = null;
 
-    if (!transactionDoc.exists()) {
+    for (const mode of ["business", "personal"] as const) {
+      const ref = getDocRef("transactions", userId, mode, transactionId);
+      const docSnap = await getDoc(ref);
+      if (docSnap.exists()) {
+        transactionDoc = docSnap;
+        transactionRef = ref;
+        break;
+      }
+    }
+
+    if (!transactionDoc || !transactionRef) {
       console.error("❌ Transaction non trouvée");
       return false;
     }
@@ -428,10 +436,21 @@ export async function deleteTransaction(transactionId: string): Promise<boolean>
       return false;
     }
 
-    const transactionRef = doc(db, "transactions", transactionId);
-    const transactionDoc = await getDoc(transactionRef);
+    // Chercher la transaction dans les deux sous-collections (personnelle et entreprise)
+    let transactionDoc: any = null;
+    let transactionRef: any = null;
 
-    if (!transactionDoc.exists()) {
+    for (const mode of ["business", "personal"] as const) {
+      const ref = getDocRef("transactions", userId, mode, transactionId);
+      const docSnap = await getDoc(ref);
+      if (docSnap.exists()) {
+        transactionDoc = docSnap;
+        transactionRef = ref;
+        break;
+      }
+    }
+
+    if (!transactionDoc || !transactionRef) {
       console.error("❌ Transaction non trouvée");
       return false;
     }
@@ -519,11 +538,13 @@ export interface VehicleJournalEntry {
 async function recomputeVehicleAnnualProfileFromJournals(
   userId: string,
   year: number,
-  vehicleProfileId: string
+  vehicleProfileId: string,
+  mode: "business" | "personal"
 ): Promise<void> {
   if (!db) return;
 
-  const profileRef = doc(db, "vehicleAnnualProfiles", vehicleProfileId);
+  // Utiliser la nouvelle structure: Users/{userId}/{mode}/vehicleAnnualProfiles
+  const profileRef = getDocRef("vehicleAnnualProfiles", userId, mode, vehicleProfileId);
   const profileSnap = await getDoc(profileRef);
 
   if (!profileSnap.exists()) {
@@ -532,15 +553,13 @@ async function recomputeVehicleAnnualProfileFromJournals(
   }
 
   const profileData = profileSnap.data() as VehicleAnnualProfile;
-  const profileMode = profileData.mode || getCurrentMode();
 
-  const journalsRef = collection(db, "vehicleJournals");
+  // Utiliser la nouvelle structure: Users/{userId}/{mode}/vehicleJournals
+  const journalsRef = getCollectionRef("vehicleJournals", userId, mode);
   const q = query(
     journalsRef,
-    where("userId", "==", userId),
     where("year", "==", year),
-    where("vehicleProfileId", "==", vehicleProfileId),
-    where("mode", "==", profileMode)
+    where("vehicleProfileId", "==", vehicleProfileId)
   );
 
   const snapshot = await getDocs(q);
@@ -597,12 +616,11 @@ export async function getVehicleAnnualProfiles(
 
     const currentMode = mode || getCurrentMode();
 
-    const profilesRef = collection(db, "vehicleAnnualProfiles");
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/vehicleAnnualProfiles
+    const profilesRef = getCollectionRef("vehicleAnnualProfiles", userId, currentMode);
     const q = query(
       profilesRef,
-      where("userId", "==", userId),
-      where("year", "==", year),
-      where("mode", "==", currentMode)
+      where("year", "==", year)
     );
 
     const snapshot = await getDocs(q);
@@ -610,9 +628,10 @@ export async function getVehicleAnnualProfiles(
 
     snapshot.forEach((d) => {
       const data = d.data() as VehicleAnnualProfile;
-      if (data.mode === currentMode) {
-        profiles.push(data);
-      }
+      profiles.push({
+        id: d.id,
+        ...data,
+      });
     });
 
     return profiles.sort((a, b) => a.vehicleName.localeCompare(b.vehicleName));
@@ -654,7 +673,10 @@ export async function upsertVehicleAnnualProfile(
     }
 
     const id = data.id || nanoid();
-    const profileRef = doc(db, "vehicleAnnualProfiles", id);
+    const currentMode = data.mode || getCurrentMode();
+    
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/vehicleAnnualProfiles
+    const profileRef = getDocRef("vehicleAnnualProfiles", userId, currentMode, id);
     const now = new Date().toISOString();
 
     const existingSnap = await getDoc(profileRef);
@@ -687,8 +709,6 @@ export async function upsertVehicleAnnualProfile(
     const deductibleTotal =
       annualFixedCosts * businessRatio + variableParkingAndOther;
 
-    const currentMode = data.mode || getCurrentMode();
-
     const profile: VehicleAnnualProfile = {
       id,
       userId,
@@ -716,7 +736,7 @@ export async function upsertVehicleAnnualProfile(
       vehicleName: data.vehicleName,
       year,
       annualFixedCosts,
-      path: `vehicleAnnualProfiles/${id}`,
+      path: `Users/${userId}/${getModeCollectionName(currentMode)}/vehicleAnnualProfiles/${id}`,
     });
 
     await setDoc(profileRef, profile);
@@ -724,7 +744,7 @@ export async function upsertVehicleAnnualProfile(
 
     // Vérifier que le profil a bien été enregistré
     try {
-      const verifyRef = doc(db, "vehicleAnnualProfiles", id);
+      const verifyRef = getDocRef("vehicleAnnualProfiles", userId, currentMode, id);
       const verifyDoc = await getDoc(verifyRef);
       if (verifyDoc.exists()) {
         console.log("✅ Profil vérifié et confirmé dans Firestore");
@@ -777,10 +797,21 @@ export async function deleteVehicleAnnualProfile(
       return false;
     }
 
-    const profileRef = doc(db, "vehicleAnnualProfiles", profileId);
-    const profileSnap = await getDoc(profileRef);
+    // Chercher le profil dans les deux sous-collections (personnelle et entreprise)
+    let profileSnap: any = null;
+    let profileRef: any = null;
 
-    if (!profileSnap.exists()) {
+    for (const mode of ["business", "personal"] as const) {
+      const ref = getDocRef("vehicleAnnualProfiles", userId, mode, profileId);
+      const docSnap = await getDoc(ref);
+      if (docSnap.exists()) {
+        profileSnap = docSnap;
+        profileRef = ref;
+        break;
+      }
+    }
+
+    if (!profileSnap || !profileRef) {
       console.error("❌ Profil annuel véhicule non trouvé");
       return false;
     }
@@ -825,12 +856,11 @@ export async function getVehicleJournals(
 
     const currentMode = mode || getCurrentMode();
 
-    const journalsRef = collection(db, "vehicleJournals");
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/vehicleJournals
+    const journalsRef = getCollectionRef("vehicleJournals", userId, currentMode);
     const q = query(
       journalsRef,
-      where("userId", "==", userId),
-      where("year", "==", year),
-      where("mode", "==", currentMode)
+      where("year", "==", year)
     );
 
     const snapshot = await getDocs(q);
@@ -838,9 +868,10 @@ export async function getVehicleJournals(
 
     snapshot.forEach((d) => {
       const data = d.data() as VehicleJournalEntry;
-      if (data.mode === currentMode) {
-        entries.push(data);
-      }
+      entries.push({
+        id: d.id,
+        ...data,
+      });
     });
 
     return entries.sort((a, b) => b.periodStart.localeCompare(a.periodStart));
@@ -885,13 +916,15 @@ export async function addVehicleJournalEntry(
       updatedAt: now,
     };
 
-    const journalRef = doc(db, "vehicleJournals", id);
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/vehicleJournals
+    const journalRef = getDocRef("vehicleJournals", userId, currentMode, id);
     await setDoc(journalRef, data);
 
     await recomputeVehicleAnnualProfileFromJournals(
       userId,
       entry.year,
-      entry.vehicleProfileId
+      entry.vehicleProfileId,
+      currentMode
     );
 
     window.dispatchEvent(new Event("vehicleJournalsUpdated"));
@@ -922,10 +955,23 @@ export async function updateVehicleJournalEntry(
       return false;
     }
 
-    const journalRef = doc(db, "vehicleJournals", journalId);
-    const journalSnap = await getDoc(journalRef);
+    // Chercher le journal dans les deux sous-collections (personnelle et entreprise)
+    let journalSnap: any = null;
+    let journalRef: any = null;
+    let foundMode: "business" | "personal" | null = null;
 
-    if (!journalSnap.exists()) {
+    for (const mode of ["business", "personal"] as const) {
+      const ref = getDocRef("vehicleJournals", userId, mode, journalId);
+      const docSnap = await getDoc(ref);
+      if (docSnap.exists()) {
+        journalSnap = docSnap;
+        journalRef = ref;
+        foundMode = mode;
+        break;
+      }
+    }
+
+    if (!journalSnap || !journalRef || !foundMode) {
       console.error("❌ Journal véhicule non trouvé");
       return false;
     }
@@ -949,7 +995,8 @@ export async function updateVehicleJournalEntry(
     await recomputeVehicleAnnualProfileFromJournals(
       userId,
       year,
-      vehicleProfileId
+      vehicleProfileId,
+      foundMode
     );
 
     window.dispatchEvent(new Event("vehicleJournalsUpdated"));
@@ -979,10 +1026,23 @@ export async function deleteVehicleJournalEntry(
       return false;
     }
 
-    const journalRef = doc(db, "vehicleJournals", journalId);
-    const journalSnap = await getDoc(journalRef);
+    // Chercher le journal dans les deux sous-collections (personnelle et entreprise)
+    let journalSnap: any = null;
+    let journalRef: any = null;
+    let foundMode: "business" | "personal" | null = null;
 
-    if (!journalSnap.exists()) {
+    for (const mode of ["business", "personal"] as const) {
+      const ref = getDocRef("vehicleJournals", userId, mode, journalId);
+      const docSnap = await getDoc(ref);
+      if (docSnap.exists()) {
+        journalSnap = docSnap;
+        journalRef = ref;
+        foundMode = mode;
+        break;
+      }
+    }
+
+    if (!journalSnap || !journalRef || !foundMode) {
       console.error("❌ Journal véhicule non trouvé");
       return false;
     }
@@ -998,7 +1058,8 @@ export async function deleteVehicleJournalEntry(
     await recomputeVehicleAnnualProfileFromJournals(
       userId,
       existing.year,
-      existing.vehicleProfileId
+      existing.vehicleProfileId,
+      foundMode
     );
 
     window.dispatchEvent(new Event("vehicleJournalsUpdated"));
@@ -1056,19 +1117,16 @@ export async function getHomeOfficeExpenses(
     const startDate = new Date(year, 0, 1).toISOString().split("T")[0];
     const endDate = new Date(year, 11, 31).toISOString().split("T")[0];
 
-    const expensesRef = collection(db, "homeOfficeExpenses");
-    const q = query(
-      expensesRef,
-      where("userId", "==", userId),
-      where("mode", "==", currentMode)
-    );
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/homeOfficeExpenses
+    const expensesRef = getCollectionRef("homeOfficeExpenses", userId, currentMode);
+    const q = query(expensesRef);
 
     const snapshot = await getDocs(q);
     const expenses: HomeOfficeExpense[] = [];
 
     snapshot.forEach((d) => {
       const data = d.data();
-      if (data.periodStart >= startDate && data.periodEnd <= endDate && data.mode === currentMode) {
+      if (data.periodStart >= startDate && data.periodEnd <= endDate) {
         expenses.push({
           id: d.id,
           ...data,
@@ -1134,19 +1192,16 @@ export async function getTechExpenses(
     const startDate = new Date(year, 0, 1).toISOString().split("T")[0];
     const endDate = new Date(year, 11, 31).toISOString().split("T")[0];
 
-    const expensesRef = collection(db, "techExpenses");
-    const q = query(
-      expensesRef,
-      where("userId", "==", userId),
-      where("mode", "==", currentMode)
-    );
+    // Utiliser la nouvelle structure: Users/{userId}/{mode}/techExpenses
+    const expensesRef = getCollectionRef("techExpenses", userId, currentMode);
+    const q = query(expensesRef);
 
     const snapshot = await getDocs(q);
     const expenses: TechExpense[] = [];
 
     snapshot.forEach((d) => {
       const data = d.data();
-      if (data.periodStart >= startDate && data.periodEnd <= endDate && data.mode === currentMode) {
+      if (data.periodStart >= startDate && data.periodEnd <= endDate) {
         expenses.push({
           id: d.id,
           ...data,

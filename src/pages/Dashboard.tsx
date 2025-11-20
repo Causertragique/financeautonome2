@@ -47,11 +47,30 @@ export default function Dashboard() {
   const [homeOfficeExpenses, setHomeOfficeExpenses] = useState<any[]>([]);
   const [techExpenses, setTechExpenses] = useState<any[]>([]);
   
+  // Cache pour les données des deux modes (pour basculement instantané)
+  const [dataCache, setDataCache] = useState<{
+    business: {
+      transactions: Transaction[];
+      vehicleExpenses: any[];
+      homeOfficeExpenses: any[];
+      techExpenses: any[];
+    };
+    personal: {
+      transactions: Transaction[];
+      vehicleExpenses: any[];
+      homeOfficeExpenses: any[];
+      techExpenses: any[];
+    };
+  }>({
+    business: { transactions: [], vehicleExpenses: [], homeOfficeExpenses: [], techExpenses: [] },
+    personal: { transactions: [], vehicleExpenses: [], homeOfficeExpenses: [], techExpenses: [] },
+  });
+  
   // Les données mock sont uniquement pour la démo quand l'utilisateur n'est pas connecté
   // Si l'utilisateur est connecté, on utilise les vraies données depuis Firestore
   const shouldShowMockData = !currentUser;
 
-  // Charger les transactions et toutes les dépenses depuis la base de données
+  // Charger les données dans le cache pour les deux modes (si usageType === "both")
   React.useEffect(() => {
     const loadAllData = async () => {
       if (!currentUser) {
@@ -59,22 +78,68 @@ export default function Dashboard() {
         setVehicleExpenses([]);
         setHomeOfficeExpenses([]);
         setTechExpenses([]);
+        setDataCache({
+          business: { transactions: [], vehicleExpenses: [], homeOfficeExpenses: [], techExpenses: [] },
+          personal: { transactions: [], vehicleExpenses: [], homeOfficeExpenses: [], techExpenses: [] },
+        });
         return;
       }
+      
       try {
-        // Déterminer le mode à utiliser (si usageType est "both", utiliser currentMode, sinon utiliser usageType)
-        const mode = usageType === "both" ? currentMode : (usageType || "business");
-        
+        // Si usageType === "both", charger les données des deux modes en parallèle
+        if (usageType === "both") {
+          const [businessData, personalData] = await Promise.all([
+            Promise.all([
+              getTransactions(selectedYear, "business"),
+              getVehicleAnnualProfiles(selectedYear, "business"),
+              getHomeOfficeExpenses(selectedYear, "business"),
+              getTechExpenses(selectedYear, "business"),
+            ]),
+            Promise.all([
+              getTransactions(selectedYear, "personal"),
+              getVehicleAnnualProfiles(selectedYear, "personal"),
+              getHomeOfficeExpenses(selectedYear, "personal"),
+              getTechExpenses(selectedYear, "personal"),
+            ]),
+          ]);
+          
+          const newCache = {
+            business: {
+              transactions: businessData[0],
+              vehicleExpenses: businessData[1],
+              homeOfficeExpenses: businessData[2],
+              techExpenses: businessData[3],
+            },
+            personal: {
+              transactions: personalData[0],
+              vehicleExpenses: personalData[1],
+              homeOfficeExpenses: personalData[2],
+              techExpenses: personalData[3],
+            },
+          };
+          
+          setDataCache(newCache);
+          
+          // Afficher les données du mode actuel
+          const mode = currentMode;
+          setTransactions(newCache[mode].transactions);
+          setVehicleExpenses(newCache[mode].vehicleExpenses);
+          setHomeOfficeExpenses(newCache[mode].homeOfficeExpenses);
+          setTechExpenses(newCache[mode].techExpenses);
+        } else {
+          // Si un seul mode, charger normalement
+          const mode = usageType || "business";
         const [transactionsData, vehicleData, homeOfficeData, techData] = await Promise.all([
-          getTransactions(selectedYear, mode),
-          getVehicleAnnualProfiles(selectedYear, mode),
-          getHomeOfficeExpenses(selectedYear, mode),
-          getTechExpenses(selectedYear, mode),
+            getTransactions(selectedYear, mode),
+            getVehicleAnnualProfiles(selectedYear, mode),
+            getHomeOfficeExpenses(selectedYear, mode),
+            getTechExpenses(selectedYear, mode),
         ]);
         setTransactions(transactionsData);
         setVehicleExpenses(vehicleData);
         setHomeOfficeExpenses(homeOfficeData);
         setTechExpenses(techData);
+        }
       } catch (error) {
         console.error("Erreur lors du chargement des données:", error);
         setTransactions([]);
@@ -111,7 +176,18 @@ export default function Dashboard() {
       window.removeEventListener("homeOfficeExpensesUpdated", handleHomeOfficeExpensesUpdate);
       window.removeEventListener("techExpensesUpdated", handleTechExpensesUpdate);
     };
-  }, [selectedYear, currentUser, currentMode, usageType]);
+  }, [selectedYear, currentUser, usageType]);
+
+  // Quand le mode change (pour usageType === "both"), basculer instantanément depuis le cache
+  React.useEffect(() => {
+    if (usageType === "both" && currentUser) {
+      const mode = currentMode;
+      setTransactions(dataCache[mode].transactions);
+      setVehicleExpenses(dataCache[mode].vehicleExpenses);
+      setHomeOfficeExpenses(dataCache[mode].homeOfficeExpenses);
+      setTechExpenses(dataCache[mode].techExpenses);
+    }
+  }, [currentMode, usageType, dataCache, currentUser]);
 
   // Calculer les statistiques réelles à partir des transactions et des dépenses spéciales
   const totalIncome = transactions
@@ -259,6 +335,9 @@ export default function Dashboard() {
 
   const categoryData = calculateCategoryData();
   
+  // Déterminer si on est en mode personnel
+  const isPersonalMode = usageType === "personal" || (usageType === "both" && currentMode === "personal");
+  
   const stats = [
     {
       label: `${t("dashboard.revenue")} ${selectedYear}`,
@@ -281,21 +360,22 @@ export default function Dashboard() {
       positive: netIncome >= 0,
       icon: DollarSign,
     },
-    {
+    // Ne pas afficher la marge bénéficiaire en mode personnel
+    ...(isPersonalMode ? [] : [{
       label: t("dashboard.margin"),
       value: shouldShowMockData ? "25.1%" : `${margin}%`,
       change: shouldShowMockData ? "+2.1%" : "0%",
       positive: true,
       icon: TrendingUp,
-    },
+    }]),
   ];
 
   return (
     <MainLayout>
-      {/* Header */}
+      {/* Header avec stats en haut à droite */}
       <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1 flex-1">
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
               <h1 className="text-2xl font-bold bg-gradient-to-r from-primary via-primary/90 to-accent bg-clip-text text-transparent">
@@ -305,6 +385,54 @@ export default function Dashboard() {
             <p className="text-muted-foreground text-sm">
               {t("dashboard.subtitle")}
             </p>
+          </div>
+          
+          {/* Stats compactes en haut à droite */}
+          <div className="flex gap-2 flex-shrink-0">
+            {stats.map((stat, index) => {
+              const Icon = stat.icon;
+              const colors = [
+                "from-blue-400/30 via-blue-500/20 to-blue-600/10",
+                "from-emerald-400/30 via-emerald-500/20 to-emerald-600/10",
+                "from-sky-400/30 via-sky-500/20 to-sky-600/10",
+                "from-amber-400/30 via-amber-500/20 to-amber-600/10",
+              ];
+              const borderColors = [
+                "border-blue-200/50",
+                "border-emerald-200/50",
+                "border-sky-200/50",
+                "border-amber-200/50",
+              ];
+              return (
+                <div
+                  key={index}
+                  className={`group relative bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-lg border ${borderColors[index]} p-2.5 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden min-w-[140px]`}
+                >
+                  <div className={`absolute inset-0 bg-gradient-to-br ${colors[index]} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+                  <div className="relative z-10">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-muted-foreground mb-1 font-medium uppercase tracking-wide truncate">
+                          {stat.label}
+                        </p>
+                        <h3 className="text-sm font-bold text-foreground truncate">
+                          {stat.value}
+                        </h3>
+                      </div>
+                      <div
+                        className={`bg-gradient-to-br ${colors[index]} p-1.5 rounded-md shadow-sm flex-shrink-0`}
+                      >
+                        <Icon
+                          className={`w-3.5 h-3.5 ${
+                            stat.positive ? "text-success" : "text-destructive"
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -333,69 +461,10 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map((stat, index) => {
-          const Icon = stat.icon;
-          const colors = [
-            "from-blue-400/30 via-blue-500/20 to-blue-600/10",
-            "from-emerald-400/30 via-emerald-500/20 to-emerald-600/10",
-            "from-sky-400/30 via-sky-500/20 to-sky-600/10",
-            "from-amber-400/30 via-amber-500/20 to-amber-600/10",
-          ];
-          const borderColors = [
-            "border-blue-200/50",
-            "border-emerald-200/50",
-            "border-sky-200/50",
-            "border-amber-200/50",
-          ];
-          return (
-            <div
-              key={index}
-              className={`group relative bg-gradient-to-br from-card via-card to-card/80 backdrop-blur-sm rounded-xl border ${borderColors[index]} p-4 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden`}
-            >
-              <div className={`absolute inset-0 bg-gradient-to-br ${colors[index]} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
-              <div className="relative z-10">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
-                      {stat.label}
-                    </p>
-                    <h3 className="text-lg font-bold text-foreground mb-2">
-                      {stat.value}
-                    </h3>
-                    <div className="flex flex-col gap-1">
-                      <span
-                        className={`text-xs font-semibold px-2 py-0.5 rounded w-fit ${
-                          stat.positive 
-                            ? "text-success bg-success/10" 
-                            : "text-destructive bg-destructive/10"
-                        }`}
-                      >
-                        {stat.change}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">{t("dashboard.vsLastPeriod")}</span>
-                    </div>
-                  </div>
-                  <div
-                    className={`bg-gradient-to-br ${colors[index]} p-2.5 rounded-lg shadow-sm transform group-hover:scale-105 transition-transform duration-300`}
-                  >
-                    <Icon
-                      className={`w-5 h-5 ${
-                        stat.positive ? "text-success" : "text-destructive"
-                      }`}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
       {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        {/* Revenue vs Expenses */}
+      <div className={`grid grid-cols-1 ${isPersonalMode ? "lg:grid-cols-2" : "lg:grid-cols-3"} gap-4 mb-6`}>
+        {/* Revenue vs Expenses - Ne pas afficher en mode personnel */}
+        {!isPersonalMode && (
         <div className="lg:col-span-2 bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-primary/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-primary/20">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-foreground">{t("dashboard.revenueVsExpenses")}</h3>
@@ -455,9 +524,10 @@ export default function Dashboard() {
             </LineChart>
           </ResponsiveContainer>
         </div>
+        )}
 
         {/* Expense Categories */}
-        <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-accent/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-accent/20">
+        <div className={`bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-accent/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-accent/20 ${isPersonalMode ? "lg:col-span-1" : ""}`}>
           <h3 className="text-base font-semibold text-foreground mb-4">{t("dashboard.expenseCategories")}</h3>
           <ResponsiveContainer width="100%" height={320}>
             <PieChart>
@@ -510,13 +580,12 @@ export default function Dashboard() {
               />
             </PieChart>
           </ResponsiveContainer>
-        </div>
       </div>
 
-      {/* Monthly Breakdown */}
-      <div className="bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-info/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-info/20 mb-6">
+        {/* Monthly Breakdown - Côte à côte avec Expense Categories en mode personnel */}
+        <div className={`bg-gradient-to-br from-card via-card to-card/95 backdrop-blur-sm rounded-xl border border-info/10 p-4 shadow-sm hover:shadow-md transition-all duration-300 hover:border-info/20 ${isPersonalMode ? "lg:col-span-1" : "lg:col-span-3"}`}>
         <h3 className="text-base font-semibold text-foreground mb-4">{t("dashboard.monthlyBreakdown")}</h3>
-        <ResponsiveContainer width="100%" height={240}>
+          <ResponsiveContainer width="100%" height={isPersonalMode ? 320 : 240}>
           <BarChart data={revenueData}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
             <XAxis
@@ -557,6 +626,7 @@ export default function Dashboard() {
             />
           </BarChart>
         </ResponsiveContainer>
+        </div>
       </div>
 
       {/* Recent Transactions */}

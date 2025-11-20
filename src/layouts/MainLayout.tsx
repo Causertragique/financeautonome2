@@ -51,11 +51,23 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const location = useLocation();
   const { selectedYear, setSelectedYear, availableYears } = useFiscalYearContext();
   const { usageType, currentMode, setCurrentMode } = useUsageMode();
+  const prevModeRef = React.useRef<typeof currentMode | null>(null);
 
   // Réinitialiser l'erreur d'image quand la photoURL change
   useEffect(() => {
     setProfileImageError(false);
   }, [currentUser?.photoURL]);
+
+  // Rediriger vers le tableau de bord quand le mode change (si usageType === "both")
+  useEffect(() => {
+    if (usageType === "both" && prevModeRef.current !== null && prevModeRef.current !== currentMode) {
+      // Si on n'est pas déjà sur le dashboard, rediriger
+      if (location.pathname !== "/") {
+        navigate("/");
+      }
+    }
+    prevModeRef.current = currentMode;
+  }, [currentMode, usageType, location.pathname, navigate]);
 
   const handleLogout = async () => {
     try {

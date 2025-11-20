@@ -164,7 +164,7 @@ export default function Accounts() {
             </div>
             <div>
               <Label htmlFor="account-type">Type de compte</Label>
-              <select id="account-type" className="w-full px-3 py-2 border rounded-lg">
+              <select id="account-type" aria-label="Type de compte" className="w-full px-3 py-2 border rounded-lg">
                 {accountTypes.map((type) => (
                   <option key={type.value} value={type.value}>
                     {type.icon} {type.label}

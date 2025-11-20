@@ -36,8 +36,8 @@ const App = () => (
     <LanguageProvider>
       <AuthProvider>
         <UsageModeProvider>
-          <FiscalYearProvider>
-            <TooltipProvider>
+        <FiscalYearProvider>
+          <TooltipProvider>
           <Toaster />
           <Sonner />
           <BrowserRouter
