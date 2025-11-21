@@ -137,8 +137,9 @@ export async function getTransactions(year: number, mode?: "business" | "persona
         orderBy("date", "desc")
       );
       const snapshot = await getDocs(q);
-      allDocs = [...snapshot.docs];
-      console.log("📊 Transactions trouvées dans sous-collection:", snapshot.size);
+      // Filtrer le document d'initialisation
+      allDocs = snapshot.docs.filter(doc => doc.id !== "__init__" && !doc.data()._initialized);
+      console.log("📊 Transactions trouvées dans sous-collection:", allDocs.length);
     } catch (orderByError: any) {
       console.warn("⚠️ Erreur avec orderBy, récupération sans tri:", orderByError?.code);
       if (orderByError?.code === "failed-precondition") {
@@ -149,8 +150,9 @@ export async function getTransactions(year: number, mode?: "business" | "persona
       }
           const q = query(transactionsRef);
           const snapshot = await getDocs(q);
-          allDocs = [...snapshot.docs];
-          console.log("📊 Transactions trouvées (sans orderBy):", snapshot.size);
+          // Filtrer le document d'initialisation
+          allDocs = snapshot.docs.filter(doc => doc.id !== "__init__" && !doc.data()._initialized);
+          console.log("📊 Transactions trouvées (sans orderBy):", allDocs.length);
     }
 
     console.log("📊 Nombre total de documents récupérés:", allDocs.length);

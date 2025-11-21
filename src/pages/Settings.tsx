@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { Save, Shield, Bell, Palette, Users, CreditCard, Globe, LogOut, AlertCircle, KeyRound, Settings2, Download, Trash2, Plus, X, Upload, User } from "lucide-react";
+import { Save, Shield, Bell, Palette, Users, CreditCard, Globe, LogOut, AlertCircle, KeyRound, Download, Trash2, Plus, X, Upload, User } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useUsageMode } from "../contexts/UsageModeContext";
@@ -9,7 +9,6 @@ import { db, auth } from "../lib/firebase";
 import { collection, getDocs, query, where, deleteDoc, doc, setDoc, getDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import { uploadProfilePhoto, deleteProfilePhoto } from "../lib/storage";
-import { migrateDataToNewStructure, inspectFirestoreStructure } from "../lib/db";
 import {
   Dialog,
   DialogContent,
@@ -69,7 +68,6 @@ export default function Settings() {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [profileImageError, setProfileImageError] = useState(false);
-  const [isMigrating, setIsMigrating] = useState(false);
   const [isUpdatingUsageType, setIsUpdatingUsageType] = useState(false);
   const [usageTypeError, setUsageTypeError] = useState("");
 
@@ -1512,148 +1510,6 @@ export default function Settings() {
 
                   {currentUser && (
                     <>
-                      <div className="pt-6 border-t border-border">
-                        <h3 className="text-lg font-semibold text-foreground mb-4">
-                          Migration des données
-                        </h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Migrez vos anciennes données vers la nouvelle structure organisée par utilisateur (Users/{'{userId}'}/data/personnelle ou entreprise).
-                        </p>
-                        <div className="flex gap-2 mb-4">
-                          <button
-                            onClick={async () => {
-                              try {
-                                console.log("🔍 Inspection de la structure Firestore...");
-                                const structure = await inspectFirestoreStructure();
-                                console.log("📊 Structure actuelle:", structure);
-                                
-                                let message = "📊 Structure actuelle de Firestore:\n\n";
-                                message += "=== ANCIENNE STRUCTURE (collections racine) ===\n";
-                                message += `Transactions: ${structure.oldStructure.transactions}\n`;
-                                message += `Profils véhicule: ${structure.oldStructure.vehicleAnnualProfiles}\n`;
-                                message += `Journaux véhicule: ${structure.oldStructure.vehicleJournals}\n`;
-                                message += `Bureau à domicile: ${structure.oldStructure.homeOfficeExpenses}\n`;
-                                message += `Dépenses techno: ${structure.oldStructure.techExpenses}\n\n`;
-                                
-                                message += "=== ANCIENNE STRUCTURE (users/{userId}/...) ===\n";
-                                message += `Transactions: ${structure.oldStructureUsers.transactions}\n`;
-                                message += `Profils véhicule: ${structure.oldStructureUsers.vehicleAnnualProfiles}\n`;
-                                message += `Journaux véhicule: ${structure.oldStructureUsers.vehicleJournals}\n`;
-                                message += `Bureau à domicile: ${structure.oldStructureUsers.homeOfficeExpenses}\n`;
-                                message += `Dépenses techno: ${structure.oldStructureUsers.techExpenses}\n\n`;
-                                
-                                message += "=== NOUVELLE STRUCTURE (Users/{userId}/data/personnelle) ===\n";
-                                message += `Transactions: ${structure.newStructure.personnelle.transactions}\n`;
-                                message += `Profils véhicule: ${structure.newStructure.personnelle.vehicleAnnualProfiles}\n`;
-                                message += `Journaux véhicule: ${structure.newStructure.personnelle.vehicleJournals}\n`;
-                                message += `Bureau à domicile: ${structure.newStructure.personnelle.homeOfficeExpenses}\n`;
-                                message += `Dépenses techno: ${structure.newStructure.personnelle.techExpenses}\n\n`;
-                                
-                                message += "=== NOUVELLE STRUCTURE (Users/{userId}/data/entreprise) ===\n";
-                                message += `Transactions: ${structure.newStructure.entreprise.transactions}\n`;
-                                message += `Profils véhicule: ${structure.newStructure.entreprise.vehicleAnnualProfiles}\n`;
-                                message += `Journaux véhicule: ${structure.newStructure.entreprise.vehicleJournals}\n`;
-                                message += `Bureau à domicile: ${structure.newStructure.entreprise.homeOfficeExpenses}\n`;
-                                message += `Dépenses techno: ${structure.newStructure.entreprise.techExpenses}\n`;
-                                
-                                alert(message);
-                              } catch (error: any) {
-                                console.error("❌ Erreur lors de l'inspection:", error);
-                                alert(`❌ Erreur lors de l'inspection:\n${error.message || error.toString()}\n\nVérifiez la console pour plus de détails.`);
-                              }
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
-                          >
-                            <Settings2 className="w-5 h-5" />
-                            <span>Inspecter la structure</span>
-                          </button>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            if (!confirm("Voulez-vous migrer toutes vos données vers la nouvelle structure ? Cette opération peut prendre quelques instants.")) {
-                              return;
-                            }
-                            setIsMigrating(true);
-                            try {
-                              console.log("🚀 Démarrage de la migration...");
-                              console.log("👤 User ID:", currentUser?.uid);
-                              const result = await migrateDataToNewStructure();
-                              console.log("📊 Résultat complet de la migration:", JSON.stringify(result, null, 2));
-                              
-                              let message = `✅ Migration terminée !\n\n`;
-                              message += `Transactions: ${result.collections.transactions.migrated} migrée(s) (${result.collections.transactions.errors} erreur(s))\n`;
-                              message += `Profils annuels véhicule: ${result.collections.vehicleAnnualProfiles.migrated} migré(s) (${result.collections.vehicleAnnualProfiles.errors} erreur(s))\n`;
-                              message += `Journaux véhicule: ${result.collections.vehicleJournals.migrated} migré(s) (${result.collections.vehicleJournals.errors} erreur(s))\n`;
-                              message += `Bureau à domicile: ${result.collections.homeOfficeExpenses.migrated} migrée(s) (${result.collections.homeOfficeExpenses.errors} erreur(s))\n`;
-                              message += `Dépenses techno: ${result.collections.techExpenses.migrated} migrée(s) (${result.collections.techExpenses.errors} erreur(s))\n\n`;
-                              
-                              const totalMigrated = 
-                                result.collections.transactions.migrated +
-                                result.collections.vehicleAnnualProfiles.migrated +
-                                result.collections.vehicleJournals.migrated +
-                                result.collections.homeOfficeExpenses.migrated +
-                                result.collections.techExpenses.migrated;
-                              
-                              const totalErrors = 
-                                result.collections.transactions.errors +
-                                result.collections.vehicleAnnualProfiles.errors +
-                                result.collections.vehicleJournals.errors +
-                                result.collections.homeOfficeExpenses.errors +
-                                result.collections.techExpenses.errors;
-                              
-                              message += `Total: ${totalMigrated} document(s) migré(s)`;
-                              if (totalErrors > 0) {
-                                message += `, ${totalErrors} erreur(s)`;
-                              }
-                              
-                              if (result.errors.length > 0) {
-                                message += `\n\nErreurs détaillées:\n${result.errors.slice(0, 10).join('\n')}`;
-                                if (result.errors.length > 10) {
-                                  message += `\n... et ${result.errors.length - 10} autre(s) erreur(s)`;
-                                }
-                                message += `\n\n⚠️ Consultez la console du navigateur (F12) pour plus de détails.`;
-                              }
-                              
-                              alert(message);
-                              
-                              // Afficher aussi dans la console pour le débogage
-                              if (totalErrors > 0 || !result.success) {
-                                console.error("❌ Migration terminée avec des erreurs:", result);
-                              }
-                              
-                              if (result.success && totalErrors === 0 && totalMigrated > 0) {
-                                if (confirm("✅ Migration réussie ! Voulez-vous recharger la page ?")) {
-                              window.location.reload();
-                                }
-                              } else if (totalMigrated === 0) {
-                                alert("ℹ️ Aucune donnée à migrer. Vos données sont peut-être déjà dans la nouvelle structure ou vous n'avez pas encore de données.");
-                              }
-                            } catch (error: any) {
-                              console.error("❌ Erreur lors de la migration:", error);
-                              console.error("❌ Code:", error?.code);
-                              console.error("❌ Message:", error?.message);
-                              alert(`❌ Erreur lors de la migration:\n${error.message || error.toString()}\n\nVérifiez la console pour plus de détails.`);
-                            } finally {
-                              setIsMigrating(false);
-                            }
-                          }}
-                          disabled={isMigrating}
-                          className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isMigrating ? (
-                            <>
-                              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                              <span>Migration en cours...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-5 h-5" />
-                              <span>Migrer mes données</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
                       <div className="pt-6 border-t border-border">
                         <h3 className="text-lg font-semibold text-foreground mb-4">
                           Télécharger vos données

@@ -56,11 +56,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const { usageType, currentMode, setCurrentMode, loading: usageModeLoading } = useUsageMode();
   const prevModeRef = React.useRef<typeof currentMode | null>(null);
 
-  // Debug: afficher les valeurs de usageType et currentMode
-  React.useEffect(() => {
-    console.log("🔍 MainLayout - usageType:", usageType, "currentMode:", currentMode, "loading:", usageModeLoading);
-  }, [usageType, currentMode, usageModeLoading]);
-
   // Réinitialiser l'erreur d'image quand la photoURL change
   useEffect(() => {
     setProfileImageError(false);
@@ -261,7 +256,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
                     <DropdownMenuItem
                       onClick={() => {
                         if (currentMode !== "business") {
-                          console.log("🔄 Changement de mode: business");
                           setCurrentMode("business");
                           window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "business" } }));
                         }
@@ -281,7 +275,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
                     <DropdownMenuItem
                       onClick={() => {
                         if (currentMode !== "personal") {
-                          console.log("🔄 Changement de mode: personal");
                           setCurrentMode("personal");
                           window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "personal" } }));
                         }
@@ -300,26 +293,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
-            </div>
-          )}
-          
-          {/* Message de debug temporaire */}
-          {usageModeLoading && (
-            <div className="mb-4 px-4">
-              <div className="bg-white/10 border border-white/20 rounded-lg p-2">
-                <p className="text-xs text-white/70">Chargement du mode...</p>
-              </div>
-            </div>
-          )}
-          
-          {/* Message de debug si usageType n'est pas "both" */}
-          {!usageModeLoading && usageType !== "both" && (
-            <div className="mb-4 px-4">
-              <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-2">
-                <p className="text-xs text-yellow-200">
-                  Debug: usageType = {usageType ? `"${usageType}"` : "null"} (attendu: "both")
-                </p>
               </div>
             </div>
           )}

@@ -16,7 +16,7 @@ import {
   type User as FirebaseUser,
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { doc, getDoc, setDoc, getFirestore } from "firebase/firestore";
+import { doc, getDoc, setDoc, getFirestore, collection } from "firebase/firestore";
 import { getApp } from "firebase/app";
 
 interface AuthContextType {
@@ -72,36 +72,80 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const existingDoc = await getDoc(userRef);
     const existingData = existingDoc.exists() ? existingDoc.data() : {};
     
+    // Logique pour usageType : TOUJOURS préserver celui qui existe déjà dans Firestore
+    // - Si l'utilisateur a changé l'usageType dans les paramètres, il est sauvegardé dans Firestore
+    // - Lors de la connexion, on préserve toujours la valeur existante (ne jamais écraser)
+    // - Lors de l'inscription, on peut définir un nouveau usageType si aucun n'existe
+    let finalUsageType: "business" | "personal" | "both" | null;
+    if (existingData.usageType) {
+      // Si un usageType existe déjà dans Firestore, on le préserve TOUJOURS
+      // Cela inclut les changements faits dans les paramètres du compte
+      finalUsageType = existingData.usageType;
+    } else if (usageType) {
+      // Sinon, on utilise celui passé en paramètre (lors de l'inscription uniquement)
+      finalUsageType = usageType;
+    } else {
+      // Sinon, null (pas encore défini)
+      finalUsageType = null;
+    }
+    
     const newUserData = {
       userId: user.uid,
       email: user.email || "",
       displayName: user.displayName || "",
       photoURL: user.photoURL || "",
-      // Ne mettre à jour usageType que s'il n'existe pas déjà (pour préserver le choix initial)
-      usageType: existingData.usageType || usageType || null,
+      // L'usageType choisi à la création est TOUJOURS préservé
+      usageType: finalUsageType,
       createdAt: existingData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     
-    console.log("📝 Création/Mise à jour du profil utilisateur:", user.uid);
-    console.log("📝 Données:", newUserData);
-    console.log("🔄 Exécution de setDoc()...");
-
     try {
-      console.log("🔄 Chemin du document:", `users/${user.uid}`);
-      console.log("🔄 Utilisateur authentifié:", user.uid);
-      
       // Utiliser setDoc avec merge pour créer ou mettre à jour
       await setDoc(userRef, newUserData, { merge: true });
-      console.log("✅ setDoc() terminé avec succès - Profil créé/mis à jour dans Firestore");
+      
+      // Initialiser la structure Users/{userId}/data/{mode}/ pour les nouveaux comptes
+      if (finalUsageType) {
+        const isNewUser = !existingDoc.exists();
+        if (isNewUser) {
+          // Créer la structure Users/{userId}/data/{mode}/ selon le usageType
+          const modesToInitialize: Array<"personnelle" | "entreprise"> = [];
+          
+          if (finalUsageType === "both") {
+            modesToInitialize.push("personnelle", "entreprise");
+          } else if (finalUsageType === "business") {
+            modesToInitialize.push("entreprise");
+          } else if (finalUsageType === "personal") {
+            modesToInitialize.push("personnelle");
+          }
+          
+          // Initialiser chaque mode en créant la structure Users/{userId}/data/{mode}/
+          // La structure sera créée automatiquement lors de la première écriture dans une collection
+          // On crée un document d'initialisation minimal qui reste en place
+          for (const mode of modesToInitialize) {
+            try {
+              // Créer un document d'initialisation dans la collection transactions pour initialiser la structure
+              const transactionsRef = collection(database, "Users", user.uid, "data", mode, "transactions");
+              const initDocRef = doc(transactionsRef, "__init__");
+              await setDoc(initDocRef, { 
+                _initialized: true, 
+                _type: "initialization",
+                createdAt: new Date().toISOString() 
+              }, { merge: true });
+            } catch (initError: any) {
+              // Ignorer les erreurs d'initialisation (la structure sera créée lors de la première vraie écriture)
+              if (initError?.code !== "permission-denied") {
+                console.warn(`⚠️ Impossible d'initialiser Users/${user.uid}/data/${mode}/:`, initError?.message);
+              }
+            }
+          }
+        }
+      }
       
       // Vérifier immédiatement si les données existent
       try {
         const snapshot = await getDoc(userRef);
-        if (snapshot.exists()) {
-          console.log("✅ Profil vérifié et confirmé dans Firestore");
-          console.log("📄 Contenu:", snapshot.data());
-        } else {
+        if (!snapshot.exists()) {
           console.warn("⚠️ Profil créé mais pas encore visible (synchronisation en cours)");
         }
       } catch (verifyError: any) {
@@ -132,11 +176,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Vérifier si l'utilisateur revient d'une redirection OAuth
     getRedirectResult(auth)
-      .then((result) => {
-        if (result) {
-          console.log("✅ Connexion réussie via redirection");
-        }
-      })
       .catch((error) => {
         // Ignorer les erreurs de redirection si l'utilisateur n'a pas utilisé cette méthode
         if (error.code !== "auth/popup-closed-by-user") {
@@ -145,32 +184,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("🔐 onAuthStateChanged déclenché, utilisateur:", user?.uid || "déconnecté");
       setCurrentUser(user);
       setLoading(false);
       
       // Créer le profil utilisateur dans Firestore
       if (user) {
-        console.log("👤 Utilisateur connecté, création du profil dans Firestore...");
         // Essayer plusieurs fois avec délai, en attendant que Firestore soit en ligne
         const createProfile = async () => {
           // Attendre un peu pour que Firestore soit prêt
           await new Promise(resolve => setTimeout(resolve, 1000));
           
           for (let i = 0; i < 5; i++) {
-            console.log(`🔄 Tentative ${i + 1}/5 de création du profil utilisateur`);
             try {
               await ensureUserProfile(user);
-              console.log("✅ ensureUserProfile terminé avec succès");
-              
-              // Les écritures dans Firestore sont synchronisées automatiquement
-              console.log("✅ Écritures synchronisées avec Firestore");
               break; // Succès, on sort
             } catch (error: any) {
               console.error(`❌ Erreur tentative ${i + 1}:`, error?.code, error?.message);
               if (i < 4) {
                 const delay = 1000 * (i + 1);
-                console.log(`⏳ Attente de ${delay}ms avant la prochaine tentative...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
               } else {
                 console.error("❌ Échec après 5 tentatives");
@@ -179,8 +210,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         };
         createProfile();
-      } else {
-        console.log("👤 Aucun utilisateur connecté");
       }
     });
 
@@ -193,13 +222,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     // Sauvegarder le type d'utilisation dans le profil utilisateur
-    if (usageType && userCredential.user) {
+    if (userCredential.user) {
       try {
         await ensureUserProfile(userCredential.user, usageType);
-        console.log("✅ Type d'utilisation sauvegardé:", usageType);
       } catch (error) {
-        console.error("❌ Erreur lors de la sauvegarde du type d'utilisation:", error);
-        // Ne pas bloquer l'inscription si la sauvegarde du type échoue
+        console.error("❌ Erreur lors de la sauvegarde du profil utilisateur:", error);
+        // Ne pas bloquer l'inscription si la sauvegarde échoue
       }
     }
   };
@@ -208,7 +236,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!auth) {
       throw new Error("Firebase Auth n'est pas initialisé");
     }
-    await signInWithEmailAndPassword(auth, email, password);
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    // S'assurer que le profil utilisateur existe dans Firestore (préserve usageType existant)
+    if (userCredential.user) {
+      try {
+        await ensureUserProfile(userCredential.user);
+      } catch (error) {
+        console.error("❌ Erreur lors de la vérification du profil utilisateur:", error);
+        // Ne pas bloquer la connexion si la vérification échoue
+      }
+    }
   };
 
   const signInWithGoogle = async () => {
@@ -221,36 +258,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       throw new Error("Firebase Auth n'est pas initialisé. Vérifiez votre configuration dans .env");
     }
     
-    // Vérifier que le domaine est valide
-    const currentDomain = window.location.hostname;
-    console.log(`🔍 Tentative de connexion depuis: ${currentDomain}`);
-    
     try {
       const provider = new GoogleAuthProvider();
       // Ajouter des scopes si nécessaire
       provider.addScope('email');
       provider.addScope('profile');
       
-      const currentUrl = window.location.origin;
-      const redirectUri = `${currentUrl}/__/auth/handler`;
-      console.log("🔄 Ouverture de la popup Google...");
-      console.log("📍 URL actuelle:", window.location.href);
-      console.log("📍 URI de redirection attendue:", redirectUri);
-      console.log("💡 Vérifiez dans l'onglet Network (F12) si cette URI correspond à celle dans Google Cloud Console");
-      
       const result = await signInWithPopup(auth, provider);
-      console.log("✅ Connexion Google réussie");
       
       // Vérifier si c'est un nouvel utilisateur et s'il n'a pas de type d'utilisation défini
       if (result.user && db) {
         try {
           const userRef = doc(db, "users", result.user.uid);
           const userDoc = await getDoc(userRef);
-          if (!userDoc.exists() || !userDoc.data()?.usageType) {
-            // C'est un nouvel utilisateur ou il n'a pas de type d'utilisation
-            // On laissera l'utilisateur le définir plus tard dans les paramètres
-            console.log("ℹ️ Nouvel utilisateur Google - le type d'utilisation pourra être défini dans les paramètres");
-          }
         } catch (error) {
           console.warn("⚠️ Impossible de vérifier le type d'utilisation:", error);
         }
@@ -261,15 +281,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error("   Message:", error.message);
       console.error("   Détails complets:", error);
       
-      // Vérifier si c'est vraiment popup-closed-by-user ou si c'est masqué
-      if (error.code === "auth/popup-closed-by-user") {
-        console.warn("⚠️ La popup a été fermée. Cela peut être dû à :");
-        console.warn("   1. L'utilisateur a fermé la fenêtre");
-        console.warn("   2. Le navigateur bloque les popups");
-        console.warn("   3. Une erreur redirect_uri_mismatch (vérifiez l'onglet Network)");
-        console.warn("   4. Le domaine n'est pas autorisé");
-        console.warn("💡 Ouvrez l'onglet Network (F12) et cherchez les requêtes vers 'accounts.google.com' pour voir l'erreur réelle");
-      }
       
       // Détecter l'erreur redirect_uri_mismatch dans le message
       const errorMessage = error.message?.toLowerCase() || "";
@@ -281,7 +292,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (isRedirectUriMismatch) {
         const currentUrl = window.location.origin;
         const redirectUri = `${currentUrl}/__/auth/handler`;
-        console.error("🔍 URI de redirection utilisée:", redirectUri);
         throw new Error(
           `Erreur redirect_uri_mismatch : L'URI de redirection ne correspond pas. ` +
           `URI utilisée: ${redirectUri}. ` +

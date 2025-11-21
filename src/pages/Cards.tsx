@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
 import { Plus, CreditCard, TrendingUp, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,28 @@ const cardTypes = [
   { value: "amex", label: "American Express", icon: "💳" },
   { value: "desjardins", label: "Desjardins", icon: "💳" },
 ];
+
+interface ProgressBarProps {
+  value: number;
+  className?: string;
+}
+
+const ProgressBar: React.FC<ProgressBarProps> = ({ value, className = "" }) => {
+  const barRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (barRef.current) {
+      barRef.current.style.width = `${Math.min(value, 100)}%`;
+    }
+  }, [value]);
+
+  return (
+    <div
+      ref={barRef}
+      className={`h-full rounded-full transition-all ${className}`}
+    />
+  );
+};
 
 export default function Cards() {
   const [showAddCard, setShowAddCard] = useState(false);
@@ -160,12 +182,11 @@ export default function Cards() {
                           <p className="text-sm font-medium">{utilization.toFixed(0)}%</p>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                          {/* Dynamic width requires CSS custom property - inline style is necessary for progress bar */}
-                          <div
-                            className={`h-full rounded-full transition-all progress-bar ${
+                          <ProgressBar
+                            value={utilization}
+                            className={
                               utilization > 80 ? "bg-destructive" : utilization > 50 ? "bg-warning" : "bg-success"
-                            }`}
-                            style={{ "--progress-width": `${Math.min(utilization, 100)}%` } as React.CSSProperties & { "--progress-width": string }}
+                            }
                           />
                         </div>
                       </div>
