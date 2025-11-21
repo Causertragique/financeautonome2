@@ -12,7 +12,31 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Règles pour la collection users et toutes ses sous-collections
+    // Règles pour la collection Users (majuscule) avec la nouvelle structure Users/{userId}/data/{mode}/{collection}
+    // Chaque utilisateur peut uniquement accéder à ses propres données
+    match /Users/{userId} {
+      // Permettre la création/lecture du document Users/{userId} lui-même
+      allow read, write: if isOwner(userId);
+      
+      // Document intermédiaire "data" pour avoir un nombre impair de segments
+      match /data/{mode}/{collection} {
+        // Permettre toutes les opérations sur les collections (list, read, write)
+        allow read, write, list: if isOwner(userId);
+        
+        // Permettre l'accès aux documents individuels
+        match /{documentId} {
+          allow read, write: if isOwner(userId);
+          allow create: if isAuthenticated() && request.auth.uid == userId;
+        }
+      }
+      
+      // Permettre l'accès récursif à toutes les sous-collections
+      match /{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // Règles pour la collection users (minuscule) - ancienne structure pour compatibilité
     // Chaque utilisateur peut uniquement accéder à ses propres données
     match /users/{userId} {
       // Profil utilisateur
@@ -118,6 +142,16 @@ service cloud.firestore {
     }
     
     match /vehicleAnnualProfiles {
+      allow list: if isAuthenticated();
+    }
+    
+    match /vehicleJournals/{journalId} {
+      allow read: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update, delete: if isAuthenticated() && (resource == null || isOwner(resource.data.userId));
+    }
+    
+    match /vehicleJournals {
       allow list: if isAuthenticated();
     }
     

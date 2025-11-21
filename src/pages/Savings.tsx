@@ -80,38 +80,16 @@ const savingsTypes = [
 
 export default function Savings() {
   const [showAddSaving, setShowAddSaving] = useState(false);
-  const [savings, setSavings] = useState([
-    {
-      id: "1",
-      name: "CELI principal",
-      type: "celi",
-      balance: 25000,
-      contribution: 25000,
-      target: 50000,
-      institution: "Desjardins",
-      annualContribution: 7000,
-    },
-    {
-      id: "2",
-      name: "REER retraite",
-      type: "reer",
-      balance: 45000,
-      contribution: 45000,
-      target: 100000,
-      institution: "RBC",
-      annualContribution: 6000,
-    },
-    {
-      id: "3",
-      name: "Fonds d'urgence",
-      type: "epargne_urgence",
-      balance: 15000,
-      contribution: 15000,
-      target: 20000,
-      institution: "Banque Nationale",
-      annualContribution: 0,
-    },
-  ]);
+  const [savings, setSavings] = useState<Array<{
+    id: string;
+    name: string;
+    type: string;
+    balance: number;
+    contribution: number;
+    target: number;
+    institution: string;
+    annualContribution: number;
+  }>>([]);
 
   const totalSavings = savings.reduce((sum, s) => sum + s.balance, 0);
   const totalTarget = savings.reduce((sum, s) => sum + s.target, 0);

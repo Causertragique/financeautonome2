@@ -29,32 +29,14 @@ const accountTypes = [
 
 export default function Accounts() {
   const [showAddAccount, setShowAddAccount] = useState(false);
-  const [accounts, setAccounts] = useState([
-    {
-      id: "1",
-      name: "Compte chèque principal",
-      type: "cheque",
-      institution: "Desjardins",
-      balance: 5420.50,
-      accountNumber: "****1234",
-    },
-    {
-      id: "2",
-      name: "CELI",
-      type: "celi",
-      institution: "Banque Nationale",
-      balance: 12500.00,
-      accountNumber: "****5678",
-    },
-    {
-      id: "3",
-      name: "REER",
-      type: "reer",
-      institution: "RBC",
-      balance: 45000.00,
-      accountNumber: "****9012",
-    },
-  ]);
+  const [accounts, setAccounts] = useState<Array<{
+    id: string;
+    name: string;
+    type: string;
+    institution: string;
+    balance: number;
+    accountNumber: string;
+  }>>([]);
 
   const totalBalance = accounts.reduce((sum, a) => sum + a.balance, 0);
 

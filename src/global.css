@@ -143,10 +143,6 @@
   .progress-bar {
     width: var(--progress-width, 0%);
   }
-  
-  .progress-bar[data-progress] {
-    width: var(--progress-width);
-  }
   .btn-primary {
     padding: 0.5rem 1rem;
     background-color: hsl(var(--primary));
@@ -182,5 +178,9 @@
 
   .text-muted {
     color: hsl(var(--muted-foreground));
+  }
+
+  .progress-bar {
+    width: calc(var(--progress-width, 0) * 1%);
   }
 }

@@ -26,6 +26,9 @@ import {
   CreditCard,
   PiggyBank,
   Target,
+  Globe,
+  Briefcase,
+  CheckCircle2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -42,7 +45,7 @@ interface MainLayoutProps {
 }
 
 export default function MainLayout({ children }: MainLayoutProps) {
-  const { t } = useLanguage();
+  const { t, language, setLanguage } = useLanguage();
   const { currentUser, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -50,8 +53,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const [profileImageError, setProfileImageError] = useState(false);
   const location = useLocation();
   const { selectedYear, setSelectedYear, availableYears } = useFiscalYearContext();
-  const { usageType, currentMode, setCurrentMode } = useUsageMode();
+  const { usageType, currentMode, setCurrentMode, loading: usageModeLoading } = useUsageMode();
   const prevModeRef = React.useRef<typeof currentMode | null>(null);
+
+  // Debug: afficher les valeurs de usageType et currentMode
+  React.useEffect(() => {
+    console.log("🔍 MainLayout - usageType:", usageType, "currentMode:", currentMode, "loading:", usageModeLoading);
+  }, [usageType, currentMode, usageModeLoading]);
 
   // Réinitialiser l'erreur d'image quand la photoURL change
   useEffect(() => {
@@ -73,14 +81,14 @@ export default function MainLayout({ children }: MainLayoutProps) {
     try {
       await logout();
       toast({
-        title: "Déconnexion réussie",
-        description: "Vous avez été déconnecté avec succès.",
+        title: t("header.logoutSuccess"),
+        description: t("header.logoutSuccessDesc"),
       });
       navigate("/login");
     } catch (error: any) {
       toast({
-        title: "Erreur",
-        description: error.message || "Une erreur est survenue lors de la déconnexion.",
+        title: t("header.logoutError"),
+        description: error.message || t("header.logoutErrorDesc"),
         variant: "destructive",
       });
     }
@@ -138,42 +146,42 @@ export default function MainLayout({ children }: MainLayoutProps) {
   // Navigation items pour finance personnelle
   const personalNavigationItems = [
     {
-      name: "Tableau de bord",
+      name: t("sidebar.personalDashboard"),
       href: "/",
       icon: BarChart3,
     },
     {
-      name: "Transactions",
+      name: t("sidebar.personalTransactions"),
       href: "/transactions",
       icon: DollarSign,
     },
     {
-      name: "Budget",
+      name: t("sidebar.personalBudget"),
       href: "/budget",
       icon: Target,
     },
     {
-      name: "Comptes",
+      name: t("sidebar.personalAccounts"),
       href: "/accounts",
       icon: Wallet,
     },
     {
-      name: "Cartes",
+      name: t("sidebar.personalCards"),
       href: "/cards",
       icon: CreditCard,
     },
     {
-      name: "Épargne",
+      name: t("sidebar.personalSavings"),
       href: "/savings",
       icon: PiggyBank,
     },
     {
-      name: "Rapports",
+      name: t("sidebar.personalReports"),
       href: "/reports",
       icon: FileText,
     },
     {
-      name: "Paramètres",
+      name: t("sidebar.personalSettings"),
       href: "/settings",
       icon: Settings,
     },
@@ -228,25 +236,89 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-hidden">
-          {/* Switch pour basculer entre personnelle et entreprise (si usageType = "both") */}
-          {sidebarOpen && usageType === "both" && (
+          {/* Dropdown pour basculer entre personnelle et entreprise (si usageType = "both") */}
+          {!usageModeLoading && usageType === "both" && (
             <div className="mb-4 px-4">
-              <div className="bg-white/10 border border-white/20 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="mode-switch" className="text-white text-sm font-medium cursor-pointer">
-                    {currentMode === "business" ? "Entreprise" : "Personnelle"}
-                  </Label>
-                  <Switch
-                    id="mode-switch"
-                    checked={currentMode === "personal"}
-                    onCheckedChange={(checked) => setCurrentMode(checked ? "personal" : "business")}
-                    className="data-[state=checked]:bg-sidebar-primary"
-                  />
-                </div>
-                <p className="text-xs text-white/70">
-                  {currentMode === "business" 
-                    ? "Mode entreprise actif" 
-                    : "Mode finance personnelle actif"}
+              <div className="bg-white/10 border border-white/20 rounded-lg p-2">
+                <label className="text-xs text-white/70 mb-2 block px-2">Mode d'utilisation</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/10 transition-colors text-left group">
+                      <div className="flex items-center gap-2">
+                        {currentMode === "business" ? (
+                          <Briefcase className="w-4 h-4 text-white" />
+                        ) : (
+                          <Wallet className="w-4 h-4 text-white" />
+                        )}
+                        <span className="text-white text-sm font-medium">
+                          {currentMode === "business" ? t("header.modeBusiness") : t("header.modePersonal")}
+                        </span>
+                      </div>
+                      <ChevronDown className="w-4 h-4 text-white/70 group-hover:text-white transition-colors" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56 bg-[hsl(222.2,47.4%,11.2%)] border-white/20 shadow-xl z-50">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        if (currentMode !== "business") {
+                          console.log("🔄 Changement de mode: business");
+                          setCurrentMode("business");
+                          window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "business" } }));
+                        }
+                      }}
+                      className={`flex items-center gap-3 cursor-pointer py-2.5 ${
+                        currentMode === "business" 
+                          ? "bg-sidebar-primary/30 text-white font-medium" 
+                          : "text-white/90 hover:bg-white/10 hover:text-white"
+                      }`}
+                    >
+                      <Briefcase className="w-4 h-4" />
+                      <span className="flex-1">{t("header.modeBusiness")}</span>
+                      {currentMode === "business" && (
+                        <CheckCircle2 className="w-4 h-4 text-sidebar-primary" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        if (currentMode !== "personal") {
+                          console.log("🔄 Changement de mode: personal");
+                          setCurrentMode("personal");
+                          window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "personal" } }));
+                        }
+                      }}
+                      className={`flex items-center gap-3 cursor-pointer py-2.5 ${
+                        currentMode === "personal" 
+                          ? "bg-sidebar-primary/30 text-white font-medium" 
+                          : "text-white/90 hover:bg-white/10 hover:text-white"
+                      }`}
+                    >
+                      <Wallet className="w-4 h-4" />
+                      <span className="flex-1">{t("header.modePersonal")}</span>
+                      {currentMode === "personal" && (
+                        <CheckCircle2 className="w-4 h-4 text-sidebar-primary" />
+                      )}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          )}
+          
+          {/* Message de debug temporaire */}
+          {usageModeLoading && (
+            <div className="mb-4 px-4">
+              <div className="bg-white/10 border border-white/20 rounded-lg p-2">
+                <p className="text-xs text-white/70">Chargement du mode...</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Message de debug si usageType n'est pas "both" */}
+          {!usageModeLoading && usageType !== "both" && (
+            <div className="mb-4 px-4">
+              <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-2">
+                <p className="text-xs text-yellow-200">
+                  Debug: usageType = {usageType ? `"${usageType}"` : "null"} (attendu: "both")
                 </p>
               </div>
             </div>
@@ -259,8 +331,8 @@ export default function MainLayout({ children }: MainLayoutProps) {
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
                 className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-sidebar-primary cursor-pointer hover:bg-white/15 transition-colors"
-                aria-label="Sélectionner l'année fiscale"
-                title="Sélectionner l'année fiscale"
+                aria-label={t("header.selectFiscalYear")}
+                title={t("header.selectFiscalYear")}
               >
                 {availableYears.map((year) => (
                   <option key={year} value={year} className="bg-[hsl(222.2,47.4%,11.2%)]">
@@ -337,6 +409,29 @@ export default function MainLayout({ children }: MainLayoutProps) {
             </div>
           </div>
           <div className="flex items-center gap-4 ml-6">
+            {/* Indicateur de mode (simple, sans switch) */}
+            {usageType === "both" && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border border-border/50 rounded-lg">
+                {currentMode === "business" ? (
+                  <Briefcase className="w-4 h-4 text-primary" />
+                ) : (
+                  <Wallet className="w-4 h-4 text-primary" />
+                )}
+                <span className="text-sm font-medium text-foreground">
+                  {currentMode === "business" ? t("header.modeBusiness") : t("header.modePersonal")}
+                </span>
+              </div>
+            )}
+            {/* Switch de langue */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border border-border/50 rounded-lg">
+              <Globe className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm font-medium text-foreground">{language === "fr" ? "FR" : "EN"}</span>
+              <Switch
+                checked={language === "en"}
+                onCheckedChange={(checked) => setLanguage(checked ? "en" : "fr")}
+                className="ml-1"
+              />
+            </div>
             <button 
               type="button" 
               aria-label="Notifications"
@@ -375,7 +470,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="w-4 h-4 mr-2" />
-                  Déconnexion
+                  {t("header.logout")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

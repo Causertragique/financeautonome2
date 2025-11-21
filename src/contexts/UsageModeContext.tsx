@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { useAuth } from "./AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -50,20 +50,50 @@ export function UsageModeProvider({ children }: UsageModeProviderProps) {
         if (userDoc.exists()) {
           const userData = userDoc.data();
           const fetchedUsageType = userData.usageType as UsageType;
-          setUsageType(fetchedUsageType || null);
+          console.log("📊 Firestore - usageType récupéré:", fetchedUsageType);
+          
+          // Si usageType n'est pas défini dans Firestore, vérifier localStorage comme fallback
+          let finalUsageType = fetchedUsageType;
+          if (!finalUsageType) {
+            const savedUsageType = localStorage.getItem(`usageType_${currentUser.uid}`) as UsageType | null;
+            if (savedUsageType) {
+              console.log("📦 localStorage - usageType trouvé:", savedUsageType);
+              finalUsageType = savedUsageType;
+              // Sauvegarder dans Firestore pour la prochaine fois
+              await setDoc(userRef, { usageType: savedUsageType }, { merge: true });
+            }
+          }
+          
+          setUsageType(finalUsageType || null);
           
           // Si l'utilisateur a choisi "both", initialiser le mode depuis localStorage ou par défaut "business"
-          if (fetchedUsageType === "both") {
+          if (finalUsageType === "both") {
             const savedMode = localStorage.getItem(`usageMode_${currentUser.uid}`) as CurrentMode | null;
             setCurrentMode(savedMode || "business");
-          } else if (fetchedUsageType === "personal") {
+            console.log("✅ Mode 'both' détecté, mode actuel:", savedMode || "business");
+          } else if (finalUsageType === "personal") {
             setCurrentMode("personal");
           } else {
             setCurrentMode("business");
           }
         } else {
-          setUsageType(null);
-          setCurrentMode("business");
+          // Document n'existe pas, vérifier localStorage
+          const savedUsageType = localStorage.getItem(`usageType_${currentUser.uid}`) as UsageType | null;
+          if (savedUsageType) {
+            console.log("📦 Document n'existe pas, mais usageType trouvé dans localStorage:", savedUsageType);
+            setUsageType(savedUsageType);
+            if (savedUsageType === "both") {
+              const savedMode = localStorage.getItem(`usageMode_${currentUser.uid}`) as CurrentMode | null;
+              setCurrentMode(savedMode || "business");
+            } else if (savedUsageType === "personal") {
+              setCurrentMode("personal");
+            } else {
+              setCurrentMode("business");
+            }
+          } else {
+            setUsageType(null);
+            setCurrentMode("business");
+          }
         }
       } catch (error) {
         console.error("❌ Erreur lors de la récupération du type d'utilisation:", error);
@@ -77,10 +107,27 @@ export function UsageModeProvider({ children }: UsageModeProviderProps) {
     fetchUsageType();
   }, [currentUser]);
 
+  // Fonction wrapper pour setCurrentMode qui ajoute la sauvegarde immédiate
+  const handleSetCurrentMode = useCallback((mode: CurrentMode) => {
+    console.log("🔄 setCurrentMode appelé avec:", mode, "usageType:", usageType, "mode actuel:", currentMode);
+    if (mode === currentMode) {
+      console.log("⚠️ Mode déjà actif, pas de changement");
+      return;
+    }
+    setCurrentMode(mode);
+    if (currentUser && usageType === "both") {
+      localStorage.setItem(`usageMode_${currentUser.uid}`, mode);
+      console.log("💾 Mode sauvegardé immédiatement dans localStorage:", mode);
+      // Déclencher un événement pour que les composants se mettent à jour
+      window.dispatchEvent(new CustomEvent("usageModeChanged", { detail: { mode } }));
+    }
+  }, [currentUser, usageType, currentMode]);
+
   // Sauvegarder le mode actuel dans localStorage quand il change (pour "both")
   useEffect(() => {
     if (currentUser && usageType === "both") {
       localStorage.setItem(`usageMode_${currentUser.uid}`, currentMode);
+      console.log("💾 Mode sauvegardé dans localStorage (via useEffect):", currentMode);
     }
   }, [currentMode, usageType, currentUser]);
 
@@ -96,6 +143,9 @@ export function UsageModeProvider({ children }: UsageModeProviderProps) {
         usageType: newUsageType,
         updatedAt: new Date().toISOString(),
       }, { merge: true });
+
+      // Sauvegarder aussi dans localStorage comme backup
+      localStorage.setItem(`usageType_${currentUser.uid}`, newUsageType);
 
       // Mettre à jour l'état local
       setUsageType(newUsageType);
@@ -120,7 +170,7 @@ export function UsageModeProvider({ children }: UsageModeProviderProps) {
   const value: UsageModeContextType = {
     usageType,
     currentMode,
-    setCurrentMode,
+    setCurrentMode: handleSetCurrentMode,
     updateUsageType,
     loading,
   };

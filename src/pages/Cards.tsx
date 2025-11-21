@@ -23,30 +23,17 @@ const cardTypes = [
 
 export default function Cards() {
   const [showAddCard, setShowAddCard] = useState(false);
-  const [cards, setCards] = useState([
-    {
-      id: "1",
-      name: "Visa Desjardins Cashback",
-      type: "visa",
-      last4: "1234",
-      balance: 1250.50,
-      creditLimit: 5000,
-      dueDate: "2025-02-15",
-      institution: "Desjardins",
-      status: "active",
-    },
-    {
-      id: "2",
-      name: "Mastercard RBC Avion",
-      type: "mastercard",
-      last4: "5678",
-      balance: 0,
-      creditLimit: 10000,
-      dueDate: "2025-02-20",
-      institution: "RBC",
-      status: "active",
-    },
-  ]);
+  const [cards, setCards] = useState<Array<{
+    id: string;
+    name: string;
+    type: string;
+    last4: string;
+    balance: number;
+    creditLimit: number;
+    dueDate: string;
+    institution: string;
+    status: string;
+  }>>([]);
 
   const totalBalance = cards.reduce((sum, c) => sum + c.balance, 0);
   const totalCreditLimit = cards.reduce((sum, c) => sum + c.creditLimit, 0);
@@ -172,12 +159,13 @@ export default function Cards() {
                           <p className="text-sm text-muted-foreground">Utilisation</p>
                           <p className="text-sm font-medium">{utilization.toFixed(0)}%</p>
                         </div>
-                        <div className="w-full bg-muted rounded-full h-2">
+                        <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                          {/* Dynamic width requires CSS custom property - inline style is necessary for progress bar */}
                           <div
-                            className={`h-2 rounded-full transition-all ${
+                            className={`h-full rounded-full transition-all progress-bar ${
                               utilization > 80 ? "bg-destructive" : utilization > 50 ? "bg-warning" : "bg-success"
                             }`}
-                            style={{ width: `${Math.min(utilization, 100)}%` }}
+                            style={{ "--progress-width": `${Math.min(utilization, 100)}%` } as React.CSSProperties & { "--progress-width": string }}
                           />
                         </div>
                       </div>
@@ -210,7 +198,7 @@ export default function Cards() {
             </div>
             <div>
               <Label htmlFor="card-type">Type de carte</Label>
-              <select id="card-type" className="w-full px-3 py-2 border rounded-lg">
+              <select id="card-type" aria-label="Type de carte" className="w-full px-3 py-2 border rounded-lg">
                 {cardTypes.map((type) => (
                   <option key={type.value} value={type.value}>
                     {type.icon} {type.label}

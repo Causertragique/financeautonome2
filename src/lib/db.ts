@@ -24,8 +24,11 @@ export interface Transaction {
   description?: string;
   category?: string;
   date: string; // "YYYY-MM-DD"
-  type: "income" | "expense";
-  company?: string;
+  type: "income" | "expense" | "depense" | "transfert" | "remboursement" | "paiement_facture" | "revenue";
+  company?: string; // Pour mode business
+  account?: string; // Pour mode personal (nom du compte)
+  accountTo?: string; // Pour transfert entre comptes (compte de destination)
+  transferType?: "between_accounts" | "between_persons"; // Type de transfert
   tags?: string[];
   mode?: "business" | "personal"; // Mode d'utilisation (business ou personal)
   createdAt?: string;
@@ -76,18 +79,22 @@ function getModeCollectionName(mode: "business" | "personal"): "entreprise" | "p
 
 /**
  * Obtient la référence de collection basée sur userId et mode
+ * Structure: Users/{userId}/data/{mode}/{collection} (5 segments = collection valide)
  */
 function getCollectionRef(collectionName: string, userId: string, mode: "business" | "personal") {
   const modeName = getModeCollectionName(mode);
-  return collection(db, "Users", userId, modeName, collectionName);
+  // Structure: Users/{userId}/data/{mode}/{collection} = 5 segments (impair) = collection valide
+  return collection(db, "Users", userId, "data", modeName, collectionName);
 }
 
 /**
  * Obtient la référence de document basée sur userId et mode
+ * Structure: Users/{userId}/data/{mode}/{collection}/{docId} (6 segments = document valide)
  */
 function getDocRef(collectionName: string, userId: string, mode: "business" | "personal", docId: string) {
   const modeName = getModeCollectionName(mode);
-  return doc(db, "Users", userId, modeName, collectionName, docId);
+  // Structure: Users/{userId}/data/{mode}/{collection}/{docId} = 6 segments (pair) = document valide
+  return doc(db, "Users", userId, "data", modeName, collectionName, docId);
 }
 
 /**
@@ -140,10 +147,10 @@ export async function getTransactions(year: number, mode?: "business" | "persona
           "💡 Créez un index composite sur: collection=Users/{userId}/{mode}/transactions, fields=date (Descending)"
         );
       }
-      const q = query(transactionsRef);
-      const snapshot = await getDocs(q);
-      allDocs = [...snapshot.docs];
-      console.log("📊 Transactions trouvées (sans orderBy):", snapshot.size);
+          const q = query(transactionsRef);
+          const snapshot = await getDocs(q);
+          allDocs = [...snapshot.docs];
+          console.log("📊 Transactions trouvées (sans orderBy):", snapshot.size);
     }
 
     console.log("📊 Nombre total de documents récupérés:", allDocs.length);
@@ -153,7 +160,7 @@ export async function getTransactions(year: number, mode?: "business" | "persona
     allDocs.forEach((d) => {
       const data = d.data() as any;
       console.log("📄 Transaction trouvée:", d.id, "Date:", data.date);
-
+      
       // Vérifier que la transaction est dans la période
       if (data.date >= startDate && data.date <= endDate) {
         const transaction = {
@@ -280,7 +287,7 @@ export async function addTransaction(
 
     // Utiliser la nouvelle structure: Users/{userId}/{mode}/transactions
     const transactionRef = getDocRef("transactions", userId, currentMode, id);
-    const pathString = `Users/${userId}/${getModeCollectionName(currentMode)}/transactions/${id}`;
+    const pathString = `Users/${userId}/data/${getModeCollectionName(currentMode)}/transactions/${id}`;
     console.log("🔄 Chemin du document:", pathString);
     console.log("🔄 Exécution de setDoc()…");
 
@@ -736,7 +743,7 @@ export async function upsertVehicleAnnualProfile(
       vehicleName: data.vehicleName,
       year,
       annualFixedCosts,
-      path: `Users/${userId}/${getModeCollectionName(currentMode)}/vehicleAnnualProfiles/${id}`,
+      path: `Users/${userId}/data/${getModeCollectionName(currentMode)}/vehicleAnnualProfiles/${id}`,
     });
 
     await setDoc(profileRef, profile);
@@ -1216,5 +1223,516 @@ export async function getTechExpenses(
       error
     );
     return [];
+  }
+}
+
+// ==================== MIGRATION DES DONNÉES ====================
+
+export interface MigrationResult {
+  success: boolean;
+  collections: {
+    transactions: { migrated: number; errors: number };
+    vehicleAnnualProfiles: { migrated: number; errors: number };
+    vehicleJournals: { migrated: number; errors: number };
+    homeOfficeExpenses: { migrated: number; errors: number };
+    techExpenses: { migrated: number; errors: number };
+  };
+  errors: string[];
+}
+
+/**
+ * Migre toutes les données existantes vers la nouvelle structure Users/{userId}/{mode}
+ * Cette fonction lit les données des anciennes collections et les réorganise dans les nouvelles sous-collections
+ */
+export async function migrateDataToNewStructure(): Promise<MigrationResult> {
+  const result: MigrationResult = {
+    success: true,
+    collections: {
+      transactions: { migrated: 0, errors: 0 },
+      vehicleAnnualProfiles: { migrated: 0, errors: 0 },
+      vehicleJournals: { migrated: 0, errors: 0 },
+      homeOfficeExpenses: { migrated: 0, errors: 0 },
+      techExpenses: { migrated: 0, errors: 0 },
+    },
+    errors: [],
+  };
+
+  if (!db) {
+    result.success = false;
+    result.errors.push("❌ Firestore non initialisé");
+    return result;
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      result.success = false;
+      result.errors.push("❌ Utilisateur non authentifié");
+      return result;
+    }
+
+    console.log("🚀 Début de la migration des données pour l'utilisateur:", userId);
+
+    // ========== MIGRATION DES TRANSACTIONS ==========
+    try {
+      console.log("📦 Migration des transactions...");
+      
+      // Chercher dans la collection racine
+      const oldTransactionsRef = collection(db, "transactions");
+      const transactionsQuery = query(
+        oldTransactionsRef,
+        where("userId", "==", userId)
+      );
+      let transactionsSnapshot = await getDocs(transactionsQuery);
+      
+      console.log(`📊 ${transactionsSnapshot.size} transaction(s) trouvée(s) dans la collection racine`);
+      
+      // Si aucune trouvée, chercher aussi dans users/{userId}/transactions
+      if (transactionsSnapshot.empty) {
+        try {
+          const usersTransactionsRef = collection(db, "users", userId, "transactions");
+          transactionsSnapshot = await getDocs(usersTransactionsRef);
+          console.log(`📊 ${transactionsSnapshot.size} transaction(s) trouvée(s) dans users/${userId}/transactions`);
+        } catch (error: any) {
+          console.log("ℹ️ Aucune transaction dans users/{userId}/transactions");
+        }
+      }
+
+      if (transactionsSnapshot.empty) {
+        console.log("ℹ️ Aucune transaction à migrer");
+      }
+
+      for (const docSnap of transactionsSnapshot.docs) {
+        try {
+          const data = docSnap.data() as Transaction;
+          const mode = data.mode || "business"; // Par défaut "business" pour les anciennes données
+          console.log(`🔄 Migration transaction ${docSnap.id} (mode: ${mode})...`);
+          
+          const newRef = getDocRef("transactions", userId, mode, docSnap.id);
+          console.log(`📍 Nouveau chemin: Users/${userId}/data/${getModeCollectionName(mode)}/transactions/${docSnap.id}`);
+          
+          // Vérifier si la transaction existe déjà dans la nouvelle structure
+          const existingDoc = await getDoc(newRef);
+          if (!existingDoc.exists()) {
+            // S'assurer que l'ID est inclus dans les données
+            const dataWithId = { ...data, id: docSnap.id };
+            await setDoc(newRef, dataWithId);
+            result.collections.transactions.migrated++;
+            console.log(`✅ Transaction ${docSnap.id} migrée vers ${mode}`);
+          } else {
+            console.log(`⏭️ Transaction ${docSnap.id} déjà migrée`);
+          }
+        } catch (error: any) {
+          result.collections.transactions.errors++;
+          const errorMsg = `Erreur migration transaction ${docSnap.id}: ${error.message || error.code || error}`;
+          result.errors.push(errorMsg);
+          console.error(`❌ Erreur migration transaction ${docSnap.id}:`, error);
+          console.error(`❌ Code:`, error?.code);
+          console.error(`❌ Message:`, error?.message);
+        }
+      }
+      console.log(`✅ Transactions: ${result.collections.transactions.migrated} migrées, ${result.collections.transactions.errors} erreurs`);
+    } catch (error: any) {
+      result.success = false;
+      const errorMsg = `Erreur lors de la migration des transactions: ${error.message || error.code || error}`;
+      result.errors.push(errorMsg);
+      console.error("❌ Erreur lors de la migration des transactions:", error);
+      console.error("❌ Code:", error?.code);
+      console.error("❌ Message:", error?.message);
+    }
+
+    // ========== MIGRATION DES VEHICLE ANNUAL PROFILES ==========
+    try {
+      console.log("📦 Migration des profils annuels véhicule...");
+      const oldProfilesRef = collection(db, "vehicleAnnualProfiles");
+      const profilesQuery = query(
+        oldProfilesRef,
+        where("userId", "==", userId)
+      );
+      let profilesSnapshot = await getDocs(profilesQuery);
+      
+      console.log(`📊 ${profilesSnapshot.size} profil(s) trouvé(s) dans la collection racine`);
+      
+      if (profilesSnapshot.empty) {
+        try {
+          const usersProfilesRef = collection(db, "users", userId, "vehicleAnnualProfiles");
+          profilesSnapshot = await getDocs(usersProfilesRef);
+          console.log(`📊 ${profilesSnapshot.size} profil(s) trouvé(s) dans users/${userId}/vehicleAnnualProfiles`);
+        } catch (error: any) {
+          console.log("ℹ️ Aucun profil dans users/{userId}/vehicleAnnualProfiles");
+        }
+      }
+
+      for (const docSnap of profilesSnapshot.docs) {
+        try {
+          const data = docSnap.data() as VehicleAnnualProfile;
+          const mode = data.mode || "business";
+          const newRef = getDocRef("vehicleAnnualProfiles", userId, mode, docSnap.id);
+          
+          const existingDoc = await getDoc(newRef);
+          if (!existingDoc.exists()) {
+            const dataWithId = { ...data, id: docSnap.id };
+            await setDoc(newRef, dataWithId);
+            result.collections.vehicleAnnualProfiles.migrated++;
+            console.log(`✅ Profil véhicule ${docSnap.id} migré vers ${mode}`);
+          } else {
+            console.log(`⏭️ Profil véhicule ${docSnap.id} déjà migré`);
+          }
+        } catch (error: any) {
+          result.collections.vehicleAnnualProfiles.errors++;
+          result.errors.push(`Erreur migration profil véhicule ${docSnap.id}: ${error.message || error.code || error}`);
+          console.error(`❌ Erreur migration profil véhicule ${docSnap.id}:`, error);
+        }
+      }
+      console.log(`✅ Profils véhicule: ${result.collections.vehicleAnnualProfiles.migrated} migrés, ${result.collections.vehicleAnnualProfiles.errors} erreurs`);
+    } catch (error: any) {
+      result.success = false;
+      result.errors.push(`Erreur lors de la migration des profils véhicule: ${error.message || error.code || error}`);
+      console.error("❌ Erreur lors de la migration des profils véhicule:", error);
+    }
+
+    // ========== MIGRATION DES VEHICLE JOURNALS ==========
+    try {
+      console.log("📦 Migration des journaux véhicule...");
+      const oldJournalsRef = collection(db, "vehicleJournals");
+      const journalsQuery = query(
+        oldJournalsRef,
+        where("userId", "==", userId)
+      );
+      let journalsSnapshot = await getDocs(journalsQuery);
+      
+      console.log(`📊 ${journalsSnapshot.size} journal(aux) trouvé(s) dans la collection racine`);
+      
+      if (journalsSnapshot.empty) {
+        try {
+          const usersJournalsRef = collection(db, "users", userId, "vehicleJournals");
+          journalsSnapshot = await getDocs(usersJournalsRef);
+          console.log(`📊 ${journalsSnapshot.size} journal(aux) trouvé(s) dans users/${userId}/vehicleJournals`);
+        } catch (error: any) {
+          console.log("ℹ️ Aucun journal dans users/{userId}/vehicleJournals");
+        }
+      }
+
+      for (const docSnap of journalsSnapshot.docs) {
+        try {
+          const data = docSnap.data() as VehicleJournalEntry;
+          const mode = data.mode || "business";
+          const newRef = getDocRef("vehicleJournals", userId, mode, docSnap.id);
+          
+          const existingDoc = await getDoc(newRef);
+          if (!existingDoc.exists()) {
+            const dataWithId = { ...data, id: docSnap.id };
+            await setDoc(newRef, dataWithId);
+            result.collections.vehicleJournals.migrated++;
+            console.log(`✅ Journal véhicule ${docSnap.id} migré vers ${mode}`);
+          } else {
+            console.log(`⏭️ Journal véhicule ${docSnap.id} déjà migré`);
+          }
+        } catch (error: any) {
+          result.collections.vehicleJournals.errors++;
+          result.errors.push(`Erreur migration journal véhicule ${docSnap.id}: ${error.message || error.code || error}`);
+          console.error(`❌ Erreur migration journal véhicule ${docSnap.id}:`, error);
+        }
+      }
+      console.log(`✅ Journaux véhicule: ${result.collections.vehicleJournals.migrated} migrés, ${result.collections.vehicleJournals.errors} erreurs`);
+    } catch (error: any) {
+      result.success = false;
+      result.errors.push(`Erreur lors de la migration des journaux véhicule: ${error.message || error.code || error}`);
+      console.error("❌ Erreur lors de la migration des journaux véhicule:", error);
+    }
+
+    // ========== MIGRATION DES HOME OFFICE EXPENSES ==========
+    try {
+      console.log("📦 Migration des dépenses bureau à domicile...");
+      const oldExpensesRef = collection(db, "homeOfficeExpenses");
+      const expensesQuery = query(
+        oldExpensesRef,
+        where("userId", "==", userId)
+      );
+      let expensesSnapshot = await getDocs(expensesQuery);
+      
+      console.log(`📊 ${expensesSnapshot.size} dépense(s) bureau trouvée(s) dans la collection racine`);
+      
+      if (expensesSnapshot.empty) {
+        try {
+          const usersExpensesRef = collection(db, "users", userId, "homeOfficeExpenses");
+          expensesSnapshot = await getDocs(usersExpensesRef);
+          console.log(`📊 ${expensesSnapshot.size} dépense(s) bureau trouvée(s) dans users/${userId}/homeOfficeExpenses`);
+        } catch (error: any) {
+          console.log("ℹ️ Aucune dépense bureau dans users/{userId}/homeOfficeExpenses");
+        }
+      }
+
+      for (const docSnap of expensesSnapshot.docs) {
+        try {
+          const data = docSnap.data() as HomeOfficeExpense;
+          const mode = data.mode || "business";
+          const newRef = getDocRef("homeOfficeExpenses", userId, mode, docSnap.id);
+          
+          const existingDoc = await getDoc(newRef);
+          if (!existingDoc.exists()) {
+            const dataWithId = { ...data, id: docSnap.id };
+            await setDoc(newRef, dataWithId);
+            result.collections.homeOfficeExpenses.migrated++;
+            console.log(`✅ Dépense bureau ${docSnap.id} migrée vers ${mode}`);
+          } else {
+            console.log(`⏭️ Dépense bureau ${docSnap.id} déjà migrée`);
+          }
+        } catch (error: any) {
+          result.collections.homeOfficeExpenses.errors++;
+          result.errors.push(`Erreur migration dépense bureau ${docSnap.id}: ${error.message || error.code || error}`);
+          console.error(`❌ Erreur migration dépense bureau ${docSnap.id}:`, error);
+        }
+      }
+      console.log(`✅ Dépenses bureau: ${result.collections.homeOfficeExpenses.migrated} migrées, ${result.collections.homeOfficeExpenses.errors} erreurs`);
+    } catch (error: any) {
+      result.success = false;
+      result.errors.push(`Erreur lors de la migration des dépenses bureau: ${error.message || error.code || error}`);
+      console.error("❌ Erreur lors de la migration des dépenses bureau:", error);
+    }
+
+    // ========== MIGRATION DES TECH EXPENSES ==========
+    try {
+      console.log("📦 Migration des dépenses techno...");
+      const oldTechRef = collection(db, "techExpenses");
+      const techQuery = query(
+        oldTechRef,
+        where("userId", "==", userId)
+      );
+      let techSnapshot = await getDocs(techQuery);
+      
+      console.log(`📊 ${techSnapshot.size} dépense(s) techno trouvée(s) dans la collection racine`);
+      
+      if (techSnapshot.empty) {
+        try {
+          const usersTechRef = collection(db, "users", userId, "techExpenses");
+          techSnapshot = await getDocs(usersTechRef);
+          console.log(`📊 ${techSnapshot.size} dépense(s) techno trouvée(s) dans users/${userId}/techExpenses`);
+        } catch (error: any) {
+          console.log("ℹ️ Aucune dépense techno dans users/{userId}/techExpenses");
+        }
+      }
+
+      for (const docSnap of techSnapshot.docs) {
+        try {
+          const data = docSnap.data() as TechExpense;
+          const mode = data.mode || "business";
+          const newRef = getDocRef("techExpenses", userId, mode, docSnap.id);
+          
+          const existingDoc = await getDoc(newRef);
+          if (!existingDoc.exists()) {
+            const dataWithId = { ...data, id: docSnap.id };
+            await setDoc(newRef, dataWithId);
+            result.collections.techExpenses.migrated++;
+            console.log(`✅ Dépense techno ${docSnap.id} migrée vers ${mode}`);
+          } else {
+            console.log(`⏭️ Dépense techno ${docSnap.id} déjà migrée`);
+          }
+        } catch (error: any) {
+          result.collections.techExpenses.errors++;
+          result.errors.push(`Erreur migration dépense techno ${docSnap.id}: ${error.message || error.code || error}`);
+          console.error(`❌ Erreur migration dépense techno ${docSnap.id}:`, error);
+        }
+      }
+      console.log(`✅ Dépenses techno: ${result.collections.techExpenses.migrated} migrées, ${result.collections.techExpenses.errors} erreurs`);
+    } catch (error: any) {
+      result.success = false;
+      result.errors.push(`Erreur lors de la migration des dépenses techno: ${error.message || error.code || error}`);
+      console.error("❌ Erreur lors de la migration des dépenses techno:", error);
+    }
+
+    const totalMigrated = 
+      result.collections.transactions.migrated +
+      result.collections.vehicleAnnualProfiles.migrated +
+      result.collections.vehicleJournals.migrated +
+      result.collections.homeOfficeExpenses.migrated +
+      result.collections.techExpenses.migrated;
+
+    const totalErrors = 
+      result.collections.transactions.errors +
+      result.collections.vehicleAnnualProfiles.errors +
+      result.collections.vehicleJournals.errors +
+      result.collections.homeOfficeExpenses.errors +
+      result.collections.techExpenses.errors;
+
+    console.log(`🎉 Migration terminée: ${totalMigrated} documents migrés, ${totalErrors} erreurs`);
+    
+    if (totalErrors > 0) {
+      result.success = false;
+    }
+
+    return result;
+  } catch (error: any) {
+    result.success = false;
+    result.errors.push(`Erreur générale de migration: ${error.message}`);
+    console.error("❌ Erreur générale lors de la migration:", error);
+    return result;
+  }
+}
+
+/**
+ * Inspecte la structure actuelle de Firestore pour voir où sont stockées les données
+ */
+export async function inspectFirestoreStructure(): Promise<{
+  oldStructure: {
+    transactions: number;
+    vehicleAnnualProfiles: number;
+    vehicleJournals: number;
+    homeOfficeExpenses: number;
+    techExpenses: number;
+  };
+  oldStructureUsers: {
+    transactions: number;
+    vehicleAnnualProfiles: number;
+    vehicleJournals: number;
+    homeOfficeExpenses: number;
+    techExpenses: number;
+  };
+  newStructure: {
+    personnelle: {
+      transactions: number;
+      vehicleAnnualProfiles: number;
+      vehicleJournals: number;
+      homeOfficeExpenses: number;
+      techExpenses: number;
+    };
+    entreprise: {
+      transactions: number;
+      vehicleAnnualProfiles: number;
+      vehicleJournals: number;
+      homeOfficeExpenses: number;
+      techExpenses: number;
+    };
+  };
+}> {
+  const result = {
+    oldStructure: {
+      transactions: 0,
+      vehicleAnnualProfiles: 0,
+      vehicleJournals: 0,
+      homeOfficeExpenses: 0,
+      techExpenses: 0,
+    },
+    oldStructureUsers: {
+      transactions: 0,
+      vehicleAnnualProfiles: 0,
+      vehicleJournals: 0,
+      homeOfficeExpenses: 0,
+      techExpenses: 0,
+    },
+    newStructure: {
+      personnelle: {
+        transactions: 0,
+        vehicleAnnualProfiles: 0,
+        vehicleJournals: 0,
+        homeOfficeExpenses: 0,
+        techExpenses: 0,
+      },
+      entreprise: {
+        transactions: 0,
+        vehicleAnnualProfiles: 0,
+        vehicleJournals: 0,
+        homeOfficeExpenses: 0,
+        techExpenses: 0,
+      },
+    },
+  };
+
+  if (!db) {
+    console.warn("❌ Firestore non initialisé");
+    return result;
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      console.warn("❌ Utilisateur non authentifié");
+      return result;
+    }
+
+    console.log("🔍 Inspection de la structure Firestore pour l'utilisateur:", userId);
+
+    // Vérifier l'ancienne structure (collections racine)
+    const collections = [
+      "transactions",
+      "vehicleAnnualProfiles",
+      "vehicleJournals",
+      "homeOfficeExpenses",
+      "techExpenses",
+    ];
+
+    for (const collectionName of collections) {
+      try {
+        // Vérifier dans la collection racine avec filtre userId
+        const oldRef = collection(db, collectionName);
+        const q = query(oldRef, where("userId", "==", userId));
+        const snapshot = await getDocs(q);
+        (result.oldStructure as any)[collectionName] = snapshot.size;
+        console.log(`📊 ${collectionName} (collection racine avec userId): ${snapshot.size} document(s)`);
+        
+        // Aussi vérifier sans filtre pour voir s'il y a des données
+        try {
+          const allSnapshot = await getDocs(oldRef);
+          if (allSnapshot.size > 0) {
+            console.log(`📊 ${collectionName} (collection racine totale): ${allSnapshot.size} document(s) (sans filtre userId)`);
+            // Vérifier combien ont le bon userId
+            let countWithUserId = 0;
+            allSnapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.userId === userId) {
+                countWithUserId++;
+              }
+            });
+            if (countWithUserId !== snapshot.size) {
+              console.log(`⚠️ ${collectionName}: ${countWithUserId} document(s) avec userId=${userId} trouvé(s) manuellement`);
+            }
+          }
+        } catch (e) {
+          // Ignorer les erreurs de lecture sans filtre
+        }
+      } catch (error: any) {
+        console.warn(`⚠️ Erreur lors de l'inspection de ${collectionName}:`, error.message);
+      }
+    }
+    
+    // Vérifier aussi dans users/{userId}/... (minuscule)
+    console.log("🔍 Vérification de la structure users/{userId}/... (minuscule)");
+    for (const collectionName of collections) {
+      try {
+        const usersRef = collection(db, "users", userId, collectionName);
+        const snapshot = await getDocs(usersRef);
+        (result.oldStructureUsers as any)[collectionName] = snapshot.size;
+        if (snapshot.size > 0) {
+          console.log(`📊 ${collectionName} (users/${userId}/${collectionName}): ${snapshot.size} document(s)`);
+        }
+      } catch (error: any) {
+        // Ignorer les erreurs si la structure n'existe pas
+        console.log(`ℹ️ ${collectionName} (users/${userId}/${collectionName}): structure n'existe pas`);
+      }
+    }
+
+    // Vérifier la nouvelle structure (Users/{userId}/data/{mode}/{collection})
+    const modes = ["personnelle", "entreprise"] as const;
+
+    for (const mode of modes) {
+      for (const collectionName of collections) {
+        try {
+          const newRef = collection(db, "Users", userId, "data", mode, collectionName);
+          const snapshot = await getDocs(newRef);
+          (result.newStructure[mode] as any)[collectionName] = snapshot.size;
+          console.log(`📊 ${collectionName} (${mode}): ${snapshot.size} document(s)`);
+        } catch (error: any) {
+          console.warn(`⚠️ Erreur lors de l'inspection de Users/${userId}/data/${mode}/${collectionName}:`, error.message);
+        }
+      }
+    }
+
+    console.log("✅ Inspection terminée");
+    return result;
+  } catch (error: any) {
+    console.error("❌ Erreur lors de l'inspection:", error);
+    return result;
   }
 }

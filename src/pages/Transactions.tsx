@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { Plus, Filter, Download, Edit2, Trash2, Search, Calendar, X, Printer, DollarSign, FileText, Building2, Tag, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Paperclip, File, Trash } from "lucide-react";
+import { Plus, Filter, Download, Edit2, Trash2, Search, Calendar, X, Printer, DollarSign, FileText, Building2, Tag, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Paperclip, File, Trash, Wallet } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useFiscalYearContext } from "../contexts/FiscalYearContext";
@@ -31,6 +31,7 @@ export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string; type: string; institution: string }>>([]);
   
   // Cache pour les transactions des deux modes
   const [transactionsCache, setTransactionsCache] = useState<{
@@ -42,7 +43,7 @@ export default function Transactions() {
   });
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [sortColumn, setSortColumn] = useState<"date" | "company" | "category" | "tags" | "amount" | null>(null);
+  const [sortColumn, setSortColumn] = useState<"date" | "type" | "company" | "account" | "category" | "tags" | "amount" | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterDate, setFilterDate] = useState<string | null>(null);
   const [filterCompany, setFilterCompany] = useState<string | null>(null);
@@ -85,6 +86,40 @@ export default function Transactions() {
     };
 
     loadCompanies();
+  }, [currentUser]);
+
+  // Charger les comptes depuis Firestore (pour mode personnel)
+  useEffect(() => {
+    const loadAccounts = async () => {
+      if (!currentUser || !db) {
+        return;
+      }
+
+      try {
+        // Utiliser une sous-collection : users/{userId}/accounts
+        const accountsRef = collection(db, "users", currentUser.uid, "accounts");
+        const q = query(accountsRef);
+        const snapshot = await getDocs(q);
+        
+        const accountsData: Array<{ id: string; name: string; type: string; institution: string }> = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          accountsData.push({
+            id: doc.id,
+            name: data.name || "",
+            type: data.type || "",
+            institution: data.institution || "",
+          });
+        });
+        
+        setAccounts(accountsData);
+      } catch (error) {
+        console.error("Erreur lors du chargement des comptes:", error);
+        setAccounts([]);
+      }
+    };
+
+    loadAccounts();
   }, [currentUser]);
 
   // Charger les transactions dans le cache pour les deux modes (si usageType === "both")
@@ -130,19 +165,46 @@ export default function Transactions() {
       console.log("🔄 Événement transactionsUpdated déclenché, rechargement...");
       loadTransactions();
     };
+    
+    // Écouter les changements de mode
+    const handleModeChange = (event: CustomEvent) => {
+      console.log("🔄 Événement modeChanged détecté:", event.detail);
+      if (usageType === "both") {
+        loadTransactions();
+      }
+    };
+    
     window.addEventListener("transactionsUpdated", handleUpdate);
+    window.addEventListener("modeChanged", handleModeChange as EventListener);
     
     return () => {
       window.removeEventListener("transactionsUpdated", handleUpdate);
+      window.removeEventListener("modeChanged", handleModeChange as EventListener);
     };
-  }, [selectedYear, usageType]);
+  }, [selectedYear, usageType, currentMode]);
 
   // Quand le mode change (pour usageType === "both"), basculer instantanément depuis le cache
   useEffect(() => {
     if (usageType === "both" && currentUser) {
-      setTransactions(transactionsCache[currentMode]);
+      console.log("🔄 Changement de mode détecté dans Transactions:", currentMode);
+      console.log("📊 Cache disponible:", Object.keys(transactionsCache));
+      const cachedData = transactionsCache[currentMode];
+      if (cachedData) {
+        console.log(`✅ Chargement de ${cachedData.length} transactions pour le mode ${currentMode}`);
+        setTransactions(cachedData);
+      } else {
+        console.warn(`⚠️ Pas de données en cache pour le mode ${currentMode}, rechargement...`);
+        // Recharger les données si le cache est vide
+        getTransactions(selectedYear, currentMode).then((data) => {
+          setTransactions(data);
+          setTransactionsCache(prev => ({
+            ...prev,
+            [currentMode]: data
+          }));
+        });
+      }
     }
-  }, [currentMode, usageType, transactionsCache, currentUser]);
+  }, [currentMode, usageType, transactionsCache, currentUser, selectedYear]);
   
   // Catégories par défaut avec traductions
   const defaultCategories = [
@@ -184,7 +246,36 @@ export default function Transactions() {
     
     const description = (formData.get("description") as string) || "";
     const amount = parseFloat((formData.get("amount") as string) || "0");
-    const type = (formData.get("type") as "income" | "expense") || "expense";
+    const rawType = (formData.get("type") as string) || "expense";
+    
+    // Convertir les types personnels en types génériques pour le calcul
+    let type: "income" | "expense" = "expense";
+    const isPersonalMode = currentMode === "personal" || usageType === "personal";
+    
+    if (isPersonalMode) {
+      // En mode personnel, déterminer si c'est une entrée ou sortie
+      if (rawType === "revenue") {
+        type = "income";
+      } else if (rawType === "depense" || rawType === "remboursement" || rawType === "paiement_facture") {
+        type = "expense";
+      } else if (rawType === "transfert") {
+        // Pour les transferts, vérifier si c'est entre comptes ou entre personnes
+        const transferType = formData.get("transferType") as string;
+        const accountTo = formData.get("accountTo") as string;
+        
+        if (transferType === "between_accounts" && accountTo) {
+          // Transfert entre comptes : pas d'influence sur le portrait financier
+          // On crée quand même la transaction mais avec un flag spécial
+          type = "expense"; // On garde expense mais on ne l'inclura pas dans les calculs
+        } else {
+          // Transfert entre personnes : sortie d'argent
+          type = "expense";
+        }
+      }
+    } else {
+      // Mode business : types classiques
+      type = rawType as "income" | "expense";
+    }
     const isTaxable = formData.get("isTaxable") === "true" || formData.get("isTaxable") === "on";
     const hasReceipt = formData.get("hasReceipt") === "true" || formData.get("hasReceipt") === "on";
     
@@ -255,13 +346,20 @@ export default function Transactions() {
       }
     }
     
+    const account = formData.get("account") as string;
+    const accountTo = formData.get("accountTo") as string;
+    const transferType = formData.get("transferType") as string;
+    
     const newTransaction: Omit<Transaction, "id" | "userId" | "createdAt" | "updatedAt"> = {
       date: (formData.get("date") as string) || new Date().toISOString().split('T')[0],
       description,
       category: suggestedCategory,
-      type,
+      type: isPersonalMode ? (rawType as any) : type, // Garder le type original en mode personnel
       amount,
-      company: (formData.get("company") as string) || (companies.length > 0 ? companies[0].name : ""),
+      company: isPersonalMode ? undefined : ((formData.get("company") as string) || (companies.length > 0 ? companies[0].name : "")),
+      account: isPersonalMode ? account : undefined,
+      accountTo: isPersonalMode && rawType === "transfert" && accountTo ? accountTo : undefined,
+      transferType: isPersonalMode && rawType === "transfert" ? (transferType as "between_accounts" | "between_persons") : undefined,
       tags: [],
       // Champs fiscaux
       // Si useManualTaxes est coché, utiliser les valeurs saisies (même si 0), sinon utiliser les valeurs calculées
@@ -289,11 +387,11 @@ export default function Transactions() {
         // Les transactions seront rechargées automatiquement via l'événement
       } else {
         console.error("❌ Échec de l'ajout de la transaction");
-        alert("Erreur lors de l'ajout de la transaction. Vérifiez la console pour plus de détails.");
+        alert(t("transactions.errorAdd"));
       }
     } else {
       console.warn("⚠️ Transaction invalide:", newTransaction);
-      alert("Veuillez remplir tous les champs requis (montant et description).");
+      alert(t("transactions.requiredFields"));
     }
   };
 
@@ -419,16 +517,16 @@ export default function Transactions() {
         setShowEditManualTaxes(false);
         form.reset();
       } else {
-        alert("Erreur lors de la mise à jour de la transaction. Vérifiez la console pour plus de détails.");
+        alert(t("transactions.errorUpdate"));
       }
     } else {
-      alert("Veuillez remplir tous les champs requis (montant et description).");
+      alert(t("transactions.requiredFields"));
     }
   };
   
   // Fonction pour supprimer un document
   const handleDeleteDocument = async (transactionId: string, documentUrl: string, documentIndex: number) => {
-    if (!confirm("Êtes-vous sûr de vouloir supprimer ce document ?")) {
+    if (!confirm(t("transactions.confirmDeleteDocument"))) {
       return;
     }
 
@@ -441,19 +539,19 @@ export default function Transactions() {
         await updateTransaction(transactionId, { documents: updatedDocuments.length > 0 ? updatedDocuments : undefined });
       }
     } else {
-      alert("Erreur lors de la suppression du document.");
+      alert(t("transactions.errorDeleteDocument"));
     }
   };
 
   // Fonction pour supprimer une transaction
   const handleDeleteTransaction = async (transactionId: string) => {
-    if (!confirm("Êtes-vous sûr de vouloir supprimer cette transaction ?")) {
+    if (!confirm(t("transactions.confirmDelete"))) {
       return;
     }
 
     const success = await deleteTransaction(transactionId);
     if (!success) {
-      alert("Erreur lors de la suppression de la transaction. Vérifiez la console pour plus de détails.");
+      alert(t("transactions.errorDelete"));
     }
   };
   
@@ -670,6 +768,7 @@ export default function Transactions() {
   // Obtenir les valeurs uniques pour les filtres
   const uniqueDates = Array.from(new Set(transactions.map(t => t.date))).sort().reverse();
   const uniqueCompanies = Array.from(new Set(transactions.map(t => t.company).filter(Boolean))).sort();
+  const uniqueAccounts = Array.from(new Set(transactions.map(t => t.account).filter(Boolean))).sort();
   const uniqueCategories = Array.from(new Set(transactions.map(t => t.category).filter(Boolean))).sort();
 
   // Filtrer les transactions par recherche et type
@@ -679,7 +778,10 @@ export default function Transactions() {
       .includes(searchTerm.toLowerCase());
     const matchesType = filterType === "all" || t.type === filterType;
     const matchesDate = !filterDate || t.date === filterDate;
-    const matchesCompany = !filterCompany || t.company === filterCompany;
+    const matchesCompany = !filterCompany || 
+      (currentMode === "personal" || usageType === "personal" 
+        ? t.account === filterCompany 
+        : t.company === filterCompany);
     const matchesCategory = !filterCategory || t.category === filterCategory;
     const matchesAmount = filterAmount === "all" || 
       (filterAmount === "income" && t.type === "income") ||
@@ -688,7 +790,7 @@ export default function Transactions() {
   });
 
   // Fonction pour gérer le tri
-  const handleSort = (column: "date" | "company" | "category" | "tags" | "amount") => {
+  const handleSort = (column: "date" | "type" | "company" | "account" | "category" | "tags" | "amount") => {
     if (sortColumn === column) {
       // Inverser la direction si on clique sur la même colonne
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -898,7 +1000,142 @@ export default function Transactions() {
                   </div>
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
+                  <button
+                    onClick={() => handleSort("type")}
+                    className="flex items-center gap-1 hover:text-primary transition-colors"
+                  >
+                    {t("transactions.type")}
+                    {sortColumn === "type" ? (
+                      sortDirection === "asc" ? (
+                        <ArrowUp className="w-3 h-3" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-50" />
+                    )}
+                  </button>
+                </th>
+                <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
                   {t("transactions.description")}
+                </th>
+                <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
+                  <div className="relative flex items-center gap-2">
+                    <button
+                      onClick={() => handleSort("amount")}
+                      className="flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {sortColumn === "amount" ? (
+                        sortDirection === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-50" />
+                      )}
+                      {t("transactions.amount")}
+                    </button>
+                    <button
+                      onClick={() => setShowAmountFilter(!showAmountFilter)}
+                      className="p-1 hover:bg-secondary rounded transition-colors"
+                      aria-label="Filtrer par type"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showAmountFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showAmountFilter && (
+                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[180px]">
+                        <div className="p-2">
+                          <button
+                            onClick={() => { setFilterAmount("all"); setShowAmountFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "all" ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            {t("transactions.allIncomeExpenses")}
+                          </button>
+                          <button
+                            onClick={() => { setFilterAmount("income"); setShowAmountFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "income" ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            {t("transactions.incomeOnly")}
+                          </button>
+                          <button
+                            onClick={() => { setFilterAmount("expense"); setShowAmountFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "expense" ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            {t("transactions.expensesOnly")}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </th>
+                <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
+                  <div className="relative flex items-center gap-2">
+                    <button
+                      onClick={() => handleSort(currentMode === "personal" || usageType === "personal" ? "account" : "company")}
+                      className="flex items-center gap-1 hover:text-primary transition-colors"
+                    >
+                      {sortColumn === (currentMode === "personal" || usageType === "personal" ? "account" : "company") ? (
+                        sortDirection === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-50" />
+                      )}
+                      {currentMode === "personal" || usageType === "personal" ? t("transactions.account") : t("transactions.company")}
+                    </button>
+                    <button
+                      onClick={() => setShowCompanyFilter(!showCompanyFilter)}
+                      className="p-1 hover:bg-secondary rounded transition-colors"
+                      aria-label={currentMode === "personal" || usageType === "personal" ? t("transactions.filterByAccount") : t("transactions.filterByCompany")}
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${showCompanyFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCompanyFilter && (
+                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[200px] max-h-[300px] overflow-y-auto">
+                        <div className="p-2">
+                          <button
+                            onClick={() => { setFilterCompany(null); setShowCompanyFilter(false); }}
+                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${!filterCompany ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                          >
+                            {currentMode === "personal" || usageType === "personal" ? t("transactions.allAccounts") : t("transactions.allCompanies")}
+                          </button>
+                          {(currentMode === "personal" || usageType === "personal" 
+                            ? uniqueAccounts.length > 0 
+                              ? uniqueAccounts.map((accountName) => (
+                                  <button
+                                    key={accountName}
+                                    onClick={() => { setFilterCompany(accountName); setShowCompanyFilter(false); }}
+                                    className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterCompany === accountName ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                                  >
+                                    {accountName}
+                                  </button>
+                                ))
+                              : accounts.map((account) => (
+                                  <button
+                                    key={account.id}
+                                    onClick={() => { setFilterCompany(account.name); setShowCompanyFilter(false); }}
+                                    className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterCompany === account.name ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                                  >
+                                    {account.name}
+                                  </button>
+                                ))
+                            : uniqueCompanies.map((company) => (
+                                <button
+                                  key={company}
+                                  onClick={() => { setFilterCompany(company); setShowCompanyFilter(false); }}
+                                  className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterCompany === company ? 'bg-primary/10 text-primary font-medium' : ''}`}
+                                >
+                                  {company}
+                                </button>
+                              ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </th>
                 <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
                   <div className="relative flex items-center gap-2">
@@ -947,120 +1184,6 @@ export default function Transactions() {
                     )}
                   </div>
                 </th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
-                  <div className="relative flex items-center gap-2">
-                    <button
-                      onClick={() => handleSort("company")}
-                      className="flex items-center gap-1 hover:text-primary transition-colors"
-                    >
-                      {sortColumn === "company" ? (
-                        sortDirection === "asc" ? (
-                          <ArrowUp className="w-3 h-3" />
-                        ) : (
-                          <ArrowDown className="w-3 h-3" />
-                        )
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-50" />
-                      )}
-                      {t("transactions.company")}
-                    </button>
-                    <button
-                      onClick={() => setShowCompanyFilter(!showCompanyFilter)}
-                      className="p-1 hover:bg-secondary rounded transition-colors"
-                      aria-label="Filtrer par entreprise"
-                    >
-                      <ChevronDown className={`w-3 h-3 transition-transform ${showCompanyFilter ? 'rotate-180' : ''}`} />
-                    </button>
-                    {showCompanyFilter && (
-                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[200px] max-h-[300px] overflow-y-auto">
-                        <div className="p-2">
-                          <button
-                            onClick={() => { setFilterCompany(null); setShowCompanyFilter(false); }}
-                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${!filterCompany ? 'bg-primary/10 text-primary font-medium' : ''}`}
-                          >
-                            Toutes les entreprises
-                          </button>
-                          {uniqueCompanies.map((company) => (
-                            <button
-                              key={company}
-                              onClick={() => { setFilterCompany(company); setShowCompanyFilter(false); }}
-                              className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterCompany === company ? 'bg-primary/10 text-primary font-medium' : ''}`}
-                            >
-                              {company}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">
-                  <button
-                    onClick={() => handleSort("tags")}
-                    className="flex items-center gap-1 hover:text-primary transition-colors"
-                  >
-                    {t("transactions.tags")}
-                    {sortColumn === "tags" ? (
-                      sortDirection === "asc" ? (
-                        <ArrowUp className="w-3 h-3" />
-                      ) : (
-                        <ArrowDown className="w-3 h-3" />
-                      )
-                    ) : (
-                      <ArrowUpDown className="w-3 h-3 opacity-50" />
-                    )}
-                  </button>
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-semibold text-foreground">
-                  <div className="relative flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => handleSort("amount")}
-                      className="flex items-center gap-1 hover:text-primary transition-colors"
-                    >
-                      {sortColumn === "amount" ? (
-                        sortDirection === "asc" ? (
-                          <ArrowUp className="w-3 h-3" />
-                        ) : (
-                          <ArrowDown className="w-3 h-3" />
-                        )
-                      ) : (
-                        <ArrowUpDown className="w-3 h-3 opacity-50" />
-                      )}
-                      {t("transactions.amount")}
-                    </button>
-                    <button
-                      onClick={() => setShowAmountFilter(!showAmountFilter)}
-                      className="p-1 hover:bg-secondary rounded transition-colors"
-                      aria-label="Filtrer par type"
-                    >
-                      <ChevronDown className={`w-3 h-3 transition-transform ${showAmountFilter ? 'rotate-180' : ''}`} />
-                    </button>
-                    {showAmountFilter && (
-                      <div className="absolute top-full right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[180px]">
-                        <div className="p-2">
-                          <button
-                            onClick={() => { setFilterAmount("all"); setShowAmountFilter(false); }}
-                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "all" ? 'bg-primary/10 text-primary font-medium' : ''}`}
-                          >
-                            Tous (Revenus + Dépenses)
-                          </button>
-                          <button
-                            onClick={() => { setFilterAmount("income"); setShowAmountFilter(false); }}
-                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "income" ? 'bg-primary/10 text-primary font-medium' : ''}`}
-                          >
-                            Revenus seulement
-                          </button>
-                          <button
-                            onClick={() => { setFilterAmount("expense"); setShowAmountFilter(false); }}
-                            className={`w-full text-left px-3 py-2 rounded text-xs hover:bg-secondary transition-colors ${filterAmount === "expense" ? 'bg-primary/10 text-primary font-medium' : ''}`}
-                          >
-                            Dépenses seulement
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </th>
                 <th className="text-center py-3 px-4 text-sm font-semibold text-foreground">
                   {t("transactions.actions")}
                 </th>
@@ -1074,13 +1197,46 @@ export default function Transactions() {
                   </td>
                 </tr>
                       ) : sortedTransactions.length > 0 ? (
-                        sortedTransactions.map((transaction) => (
+                        sortedTransactions.map((transaction) => {
+                          // Déterminer le label du type selon le mode
+                          const getTypeLabel = () => {
+                            if (currentMode === "personal" || usageType === "personal") {
+                              switch (transaction.type) {
+                                case "revenue": return t("transactions.typeRevenue");
+                                case "depense": return t("transactions.typeDepense");
+                                case "transfert": return t("transactions.typeTransfert");
+                                case "remboursement": return t("transactions.typeRemboursement");
+                                case "paiement_facture": return t("transactions.typePaiementFacture");
+                                default: return transaction.type;
+                              }
+                            } else {
+                              return transaction.type === "income" ? t("transactions.income") : t("transactions.expense");
+                            }
+                          };
+                          
+                          // Déterminer si c'est une entrée ou sortie d'argent
+                          const isIncome = (currentMode === "personal" || usageType === "personal") 
+                            ? transaction.type === "revenue"
+                            : transaction.type === "income";
+                          
+                          return (
                 <tr
                   key={transaction.id}
                   className="border-b border-border hover:bg-secondary/50 transition-colors"
                 >
                   <td className="py-3 px-4 text-sm text-foreground">
                     {transaction.date}
+                  </td>
+                  <td className="py-3 px-4 text-sm">
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                        isIncome
+                          ? "bg-success/10 text-success border border-success/20"
+                          : "bg-destructive/10 text-destructive border border-destructive/20"
+                      }`}
+                    >
+                      {getTypeLabel()}
+                    </span>
                   </td>
                   <td className="py-3 px-4 text-sm text-foreground">
                     <div className="flex items-center gap-2">
@@ -1093,56 +1249,47 @@ export default function Transactions() {
                       )}
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-sm text-muted-foreground">
-                    {transaction.category}
-                  </td>
-                  <td className="py-3 px-4 text-sm text-muted-foreground">
-                    {transaction.company || "-"}
-                  </td>
-                  <td className="py-3 px-4 text-sm">
-                    <div className="flex flex-wrap gap-1">
-                      {(transaction.tags || []).map((tag, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-1 bg-primary/10 text-primary text-xs rounded font-medium"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
                   <td
                     className={`py-3 px-4 text-sm font-medium text-right ${
-                      transaction.type === "income"
+                      isIncome
                         ? "text-success"
                         : "text-destructive"
                     }`}
                   >
-                    {transaction.type === "income" ? "+" : "-"}
+                    {isIncome ? "+" : "-"}
                     {transaction.amount.toLocaleString("en-US", {
                       minimumFractionDigits: 2,
                     })} $
+                  </td>
+                  <td className="py-3 px-4 text-sm text-muted-foreground">
+                    {currentMode === "personal" || usageType === "personal" 
+                      ? (transaction.account || "-")
+                      : (transaction.company || "-")}
+                  </td>
+                  <td className="py-3 px-4 text-sm text-muted-foreground">
+                    {transaction.category}
                   </td>
                   <td className="py-3 px-4 text-center">
                     <div className="flex items-center justify-center gap-2">
                       <button 
                         onClick={() => handleEditTransaction(transaction)}
                         className="p-1 hover:bg-secondary rounded transition-colors"
-                        aria-label="Modifier la transaction"
+                        aria-label={t("transactions.editTransaction")}
                       >
                         <Edit2 className="w-4 h-4 text-foreground" />
                       </button>
                       <button 
                         onClick={() => handleDeleteTransaction(transaction.id)}
                         className="p-1 hover:bg-destructive/10 rounded transition-colors"
-                        aria-label="Supprimer la transaction"
+                        aria-label={t("transactions.deleteTransaction")}
                       >
                         <Trash2 className="w-4 h-4 text-destructive" />
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))
+              );
+                        })
               ) : (
                 <tr>
                   <td colSpan={7} className="py-8 px-4 text-center text-muted-foreground">
@@ -1177,7 +1324,7 @@ export default function Transactions() {
               <button
                 onClick={() => setShowAddModal(false)}
                 className="p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
-                aria-label="Fermer"
+                aria-label={t("transactions.close")}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1220,9 +1367,41 @@ export default function Transactions() {
                       name="type" 
                       className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all" 
                       required
+                      onChange={(e) => {
+                        const transferDiv = document.getElementById("transfer-account-to");
+                        const transferTypeInput = document.getElementById("transaction-transfer-type") as HTMLInputElement;
+                        if (e.target.value === "transfert" && transferDiv) {
+                          transferDiv.classList.remove("hidden");
+                        } else if (transferDiv) {
+                          transferDiv.classList.add("hidden");
+                        }
+                        // Mettre à jour le type de transfert selon si accountTo est rempli
+                        const accountToSelect = document.getElementById("transaction-account-to") as HTMLSelectElement;
+                        if (accountToSelect && transferTypeInput) {
+                          accountToSelect.addEventListener("change", () => {
+                            if (accountToSelect.value) {
+                              transferTypeInput.value = "between_accounts";
+                            } else {
+                              transferTypeInput.value = "between_persons";
+                            }
+                          });
+                        }
+                      }}
                     >
-                      <option value="income">{t("transactions.income")}</option>
-                      <option value="expense">{t("transactions.expense")}</option>
+                      {currentMode === "business" || usageType === "business" ? (
+                        <>
+                          <option value="income">{t("transactions.income")}</option>
+                          <option value="expense">{t("transactions.expense")}</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="revenue">{t("transactions.typeRevenue")}</option>
+                          <option value="depense">{t("transactions.typeDepense")}</option>
+                          <option value="transfert">{t("transactions.typeTransfert")}</option>
+                          <option value="remboursement">{t("transactions.typeRemboursement")}</option>
+                          <option value="paiement_facture">{t("transactions.typePaiementFacture")}</option>
+                        </>
+                      )}
                     </select>
                   </div>
                   
@@ -1258,27 +1437,51 @@ export default function Transactions() {
                     />
                   </div>
                   
-                  <div>
-                    <label htmlFor="transaction-company" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-muted-foreground" />
-                      {t("transactions.company")} <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
-                    </label>
-                    <select 
-                      id="transaction-company" 
-                      name="company" 
-                      className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
-                    >
-                      {companies.length > 0 ? (
-                        companies.map((company) => (
-                          <option key={company.id} value={company.name}>
-                            {company.name}
-                          </option>
-                        ))
-                      ) : (
-                        <option value="">Aucune entreprise</option>
-                      )}
-                    </select>
-                  </div>
+                  {/* Entreprise (mode business) ou Compte (mode personal) */}
+                  {currentMode === "business" || usageType === "business" ? (
+                    <div>
+                      <label htmlFor="transaction-company" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-muted-foreground" />
+                        {t("transactions.company")} <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                      </label>
+                      <select 
+                        id="transaction-company" 
+                        name="company" 
+                        className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                      >
+                        {companies.length > 0 ? (
+                          companies.map((company) => (
+                            <option key={company.id} value={company.name}>
+                              {company.name}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">{t("transactions.noCompany")}</option>
+                        )}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label htmlFor="transaction-account" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                        <Wallet className="w-4 h-4 text-muted-foreground" />
+                        {t("transactions.account")} <span className="text-xs text-muted-foreground font-normal">({t("transactions.optional")})</span>
+                      </label>
+                      <select 
+                        id="transaction-account" 
+                        name="account" 
+                        className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                      >
+                        <option value="">{t("transactions.noAccount")}</option>
+                        {accounts.length > 0 ? (
+                          accounts.map((account) => (
+                            <option key={account.id} value={account.name}>
+                              {account.name} ({account.institution})
+                            </option>
+                          ))
+                        ) : null}
+                      </select>
+                    </div>
+                  )}
                   
                   <div className="md:col-span-2">
                     <div className="flex items-center justify-between mb-2">
@@ -1313,7 +1516,7 @@ export default function Transactions() {
                       type="button"
                       onClick={addCustomCategory}
                       className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
-                      aria-label="Ajouter la catégorie"
+                      aria-label={t("transactions.addCategory")}
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -1324,7 +1527,7 @@ export default function Transactions() {
                         setNewCategory("");
                       }}
                       className="px-3 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors"
-                      aria-label="Annuler l'ajout de catégorie"
+                      aria-label={t("transactions.cancelAddCategory")}
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1335,19 +1538,58 @@ export default function Transactions() {
                       <option key={category} value={category}>
                         {category}
                       </option>
-                    ))}
+                    )                      )}
                 </select>
                         )}
                       </div>
+
+                      {/* Champ pour transfert entre comptes (mode personnel uniquement) */}
+                      {(currentMode === "personal" || usageType === "personal") && (
+                        <div id="transfer-account-to" className="md:col-span-2 hidden">
+                          <label htmlFor="transaction-account-to" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
+                            <Wallet className="w-4 h-4 text-muted-foreground" />
+                            {t("transactions.accountTo")} <span className="text-xs text-muted-foreground font-normal">({t("transactions.transferBetweenAccountsHint")})</span>
+                          </label>
+                          <select 
+                            id="transaction-account-to" 
+                            name="accountTo" 
+                            className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                            onChange={(e) => {
+                              const transferTypeInput = document.getElementById("transaction-transfer-type") as HTMLInputElement;
+                              if (transferTypeInput) {
+                                if (e.target.value) {
+                                  transferTypeInput.value = "between_accounts";
+                                } else {
+                                  transferTypeInput.value = "between_persons";
+                                }
+                              }
+                            }}
+                          >
+                            <option value="">{t("transactions.transferBetweenAccountsInfo")}</option>
+                            {accounts.length > 0 ? (
+                              accounts.map((account) => (
+                                <option key={account.id} value={account.name}>
+                                  {account.name} ({account.institution})
+                                </option>
+                              ))
+                            ) : null}
+                          </select>
+                          <input type="hidden" name="transferType" id="transaction-transfer-type" value="between_persons" />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Si un compte de destination est sélectionné, c'est un transfert entre comptes (pas d'influence sur le portrait financier). Sinon, c'est un transfert entre personnes (sortie d'argent).
+                          </p>
+                        </div>
+                      )}
                         </div>
                       </div>
 
-                      {/* Section: Informations fiscales */}
+                      {/* Section: Informations fiscales (mode business uniquement) */}
+                      {(currentMode === "business" || usageType === "business") && (
                       <div className="space-y-4 pt-4 border-t border-border">
                         <div className="flex items-center gap-2 mb-4">
                           <FileText className="w-4 h-4 text-muted-foreground" />
                           <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-                            Informations fiscales
+                            {t("transactions.fiscalInfo")}
                           </h3>
                         </div>
                         
@@ -1359,7 +1601,7 @@ export default function Transactions() {
                                 name="isTaxable"
                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
                               />
-                              <span>Transaction taxable (GST/QST applicable)</span>
+                              <span>{t("transactions.taxableTransaction")}</span>
                             </label>
                           </div>
                           
@@ -1370,20 +1612,20 @@ export default function Transactions() {
                                 name="hasReceipt"
                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
                               />
-                              <span>Reçu disponible</span>
+                              <span>{t("transactions.receiptAvailable")}</span>
                             </label>
                           </div>
                           
                           <div className="md:col-span-2">
                             <label htmlFor="transaction-business-purpose" className="text-sm font-medium text-foreground block mb-2">
-                              Objectif commercial <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                              {t("transactions.businessPurpose")} <span className="text-xs text-muted-foreground font-normal">({t("transactions.optional")})</span>
                             </label>
                             <textarea
                               id="transaction-business-purpose"
                               name="businessPurpose"
                               rows={2}
                               className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
-                              placeholder="Décrivez l'objectif commercial de cette transaction"
+                              placeholder={t("transactions.businessPurposePlaceholder")}
                             />
                           </div>
                           
@@ -1435,7 +1677,7 @@ export default function Transactions() {
                                 onChange={(e) => setShowManualTaxes(e.target.checked)}
                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
                               />
-                              <span>Utiliser des montants de taxes manuels</span>
+                              <span>{t("transactions.useManualTaxes")}</span>
                             </label>
                             
                             <div id="manual-taxes-fields" className={`grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 ${showManualTaxes ? '' : 'hidden'}`}>
@@ -1472,6 +1714,7 @@ export default function Transactions() {
                           </div>
                         </div>
                       </div>
+                      )}
 
                       {/* Section: Documents */}
                       <div className="space-y-4 pt-4 border-t border-border">
@@ -1537,7 +1780,7 @@ export default function Transactions() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-foreground">
-                    Modifier la transaction
+                    {t("transactions.updateTransaction")}
                   </h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Modifiez les informations de la transaction
@@ -1550,7 +1793,7 @@ export default function Transactions() {
                   setEditingTransaction(null);
                 }}
                 className="p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
-                aria-label="Fermer"
+                aria-label={t("transactions.close")}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1684,7 +1927,7 @@ export default function Transactions() {
                         <div className="flex items-center gap-2 mb-4">
                           <FileText className="w-4 h-4 text-muted-foreground" />
                           <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-                            Informations fiscales
+                            {t("transactions.fiscalInfo")}
                           </h3>
                         </div>
                         
@@ -1697,7 +1940,7 @@ export default function Transactions() {
                                 defaultChecked={editingTransaction.isTaxable || false}
                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
                               />
-                              <span>Transaction taxable (GST/QST applicable)</span>
+                              <span>{t("transactions.taxableTransaction")}</span>
                             </label>
                           </div>
                           
@@ -1709,13 +1952,13 @@ export default function Transactions() {
                                 defaultChecked={editingTransaction.hasReceipt || false}
                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
                               />
-                              <span>Reçu disponible</span>
+                              <span>{t("transactions.receiptAvailable")}</span>
                             </label>
                           </div>
                           
                           <div className="md:col-span-2">
                             <label htmlFor="edit-transaction-business-purpose" className="text-sm font-medium text-foreground block mb-2">
-                              Objectif commercial <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                              {t("transactions.businessPurpose")} <span className="text-xs text-muted-foreground font-normal">({t("transactions.optional")})</span>
                             </label>
                             <textarea
                               id="edit-transaction-business-purpose"
@@ -1723,7 +1966,7 @@ export default function Transactions() {
                               rows={2}
                               defaultValue={editingTransaction.businessPurpose || ""}
                               className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
-                              placeholder="Décrivez l'objectif commercial de cette transaction"
+                              placeholder={t("transactions.businessPurposePlaceholder")}
                             />
                           </div>
                           
@@ -1777,7 +2020,7 @@ export default function Transactions() {
                                 onChange={(e) => setShowEditManualTaxes(e.target.checked)}
                                 className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
                               />
-                              <span>Utiliser des montants de taxes manuels</span>
+                              <span>{t("transactions.useManualTaxes")}</span>
                             </label>
                             
                             <div id="edit-manual-taxes-fields" className={`grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 ${showEditManualTaxes ? '' : 'hidden'}`}>
@@ -1827,14 +2070,14 @@ export default function Transactions() {
                           }}
                           className="flex-1 px-4 py-2.5 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
                         >
-                          Annuler
+                          {t("transactions.cancel")}
                         </button>
                         <button
                           type="submit"
                           className="flex-1 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium flex items-center justify-center gap-2"
                         >
                           <Edit2 className="w-4 h-4" />
-                          Enregistrer
+                          {t("transactions.save")}
                         </button>
                       </div>
                     </form>
