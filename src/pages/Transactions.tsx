@@ -65,8 +65,7 @@ export default function Transactions() {
       }
 
       try {
-        // Utiliser une sous-collection : users/{userId}/companies
-        const companiesRef = collection(db, "users", currentUser.uid, "companies");
+        const companiesRef = collection(db, "Users", currentUser.uid, "data", "entreprise", "companies");
         const q = query(companiesRef);
         const snapshot = await getDocs(q);
         

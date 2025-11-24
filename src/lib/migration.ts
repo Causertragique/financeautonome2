@@ -141,7 +141,7 @@ export async function migrateCompanies(): Promise<{ migrated: number; errors: nu
 
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
-      const newCompanyRef = doc(db, "users", userId, "companies", docSnap.id);
+      const newCompanyRef = doc(db, "Users", userId, "data", "entreprise", "companies", docSnap.id);
       
       // Nettoyer les données
       const cleanedData = { ...data };

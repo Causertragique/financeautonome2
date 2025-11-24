@@ -84,10 +84,8 @@ export default function Companies() {
       }
 
       try {
-        // Utiliser une sous-collection : users/{userId}/companies
-        const companiesRef = collection(db, "users", currentUser.uid, "companies");
-        const q = query(companiesRef);
-        const snapshot = await getDocs(q);
+        const companiesRef = collection(db, "Users", currentUser.uid, "data", "entreprise", "companies");
+        const snapshot = await getDocs(query(companiesRef));
         
         const companiesData: Company[] = [];
         snapshot.forEach((doc) => {
@@ -97,9 +95,11 @@ export default function Companies() {
           } as Company);
         });
         
+        console.log("✅ Total entreprises chargées:", companiesData.length);
         setCompanies(companiesData);
       } catch (error) {
-        console.error("Erreur lors de la récupération des entreprises:", error);
+        console.error("❌ Erreur lors de la récupération des entreprises:", error);
+        console.error("❌ Détails:", error);
       } finally {
         setLoading(false);
       }
@@ -182,8 +182,7 @@ export default function Companies() {
         updatedAt: new Date().toISOString(),
       };
 
-      // Utiliser une sous-collection : users/{userId}/companies
-      const companiesRef = collection(db, "users", currentUser.uid, "companies");
+      const companiesRef = collection(db, "Users", currentUser.uid, "data", "entreprise", "companies");
       await addDoc(companiesRef, companyData);
       
       console.log("✅ Entreprise créée avec succès");
@@ -201,7 +200,7 @@ export default function Companies() {
       setShowAddModal(false);
       
       // Rafraîchir la liste
-      const snapshot = await getDocs(query(companiesRef, where("userId", "==", currentUser.uid)));
+      const snapshot = await getDocs(query(companiesRef));
       const companiesData: Company[] = [];
       snapshot.forEach((doc) => {
         companiesData.push({
@@ -229,8 +228,7 @@ export default function Companies() {
     }
 
     try {
-      // Utiliser une sous-collection : users/{userId}/companies
-      const companyRef = doc(db, "users", currentUser.uid, "companies", companyId);
+      const companyRef = doc(db, "Users", currentUser.uid, "data", "entreprise", "companies", companyId);
       await deleteDoc(companyRef);
       
       // Rafraîchir la liste
@@ -271,7 +269,14 @@ export default function Companies() {
         </div>
       ) : displayCompanies.length === 0 ? (
         <div className="text-center py-8">
-          <p className="text-muted-foreground">Aucune entreprise enregistrée</p>
+          <p className="text-muted-foreground mb-4">Aucune entreprise enregistrée</p>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium mx-auto"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Ajouter votre première entreprise</span>
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

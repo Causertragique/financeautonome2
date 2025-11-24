@@ -298,7 +298,7 @@ export default function Budget() {
     const loadCompanies = async () => {
       if (!userId || !db) return;
       try {
-        const companiesRef = collection(db, "users", userId, "companies");
+        const companiesRef = collection(db, "Users", userId, "data", "entreprise", "companies");
         const snapshot = await getDocs(companiesRef);
         const companiesData: Array<{ id: string; name: string }> = [];
         snapshot.forEach((doc) => {

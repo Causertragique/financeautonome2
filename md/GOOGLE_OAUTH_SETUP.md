@@ -50,12 +50,15 @@ https://autonomev1-477910.web.app
 https://novafinances.app
 https://www.novafinances.app
 http://localhost:8080
+http://localhost:8082
 http://localhost:5173
 ```
 
 ### Authorized redirect URIs :
 
 Ajoutez **TOUTES** ces URLs :
+
+**Pour Firebase Auth (si utilisé) :**
 ```
 https://autonomev1-477910.web.app/__/auth/handler
 https://autonomev1-477910.web.app/__/auth/handler?mode=select
@@ -65,8 +68,17 @@ https://www.novafinances.app/__/auth/handler
 https://www.novafinances.app/__/auth/handler?mode=select
 http://localhost:8080/__/auth/handler
 http://localhost:8080/__/auth/handler?mode=select
+http://localhost:8082/__/auth/handler
+http://localhost:8082/__/auth/handler?mode=select
 http://localhost:5173/__/auth/handler
 http://localhost:5173/__/auth/handler?mode=select
+```
+
+**Pour les intégrations OAuth (Google Sheets, etc.) :**
+```
+https://novafinances.app/integrations/callback/google_sheets
+http://localhost:8080/integrations/callback/google_sheets
+http://localhost:8082/integrations/callback/google_sheets
 ```
 
 ## 3. Vérification dans le code

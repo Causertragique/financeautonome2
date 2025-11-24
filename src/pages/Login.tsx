@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -223,6 +223,22 @@ export default function Login() {
                 ? "Déjà un compte ? Se connecter"
                 : "Pas de compte ? Créer un compte"}
             </button>
+          </div>
+          
+          <div className="flex justify-center gap-4 pt-4 border-t text-xs text-muted-foreground">
+            <Link
+              to="/privacy"
+              className="hover:text-primary transition-colors underline"
+            >
+              Confidentialité
+            </Link>
+            <span>•</span>
+            <Link
+              to="/terms"
+              className="hover:text-primary transition-colors underline"
+            >
+              Conditions
+            </Link>
           </div>
         </CardContent>
       </Card>

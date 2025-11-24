@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { Save, Shield, Bell, Palette, Users, CreditCard, Globe, LogOut, AlertCircle, KeyRound, Download, Trash2, Plus, X, Upload, User } from "lucide-react";
+import { Save, Shield, Bell, Palette, Users, CreditCard, Globe, LogOut, AlertCircle, KeyRound, Download, Trash2, Plus, X, Upload, User, Plug, ExternalLink, CheckCircle2 } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useUsageMode } from "../contexts/UsageModeContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { db, auth } from "../lib/firebase";
 import { collection, getDocs, query, where, deleteDoc, doc, setDoc, getDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
@@ -19,6 +19,7 @@ import {
 } from "../components/ui/dialog";
 import { authenticator } from "otplib";
 import QRCode from "qrcode";
+import { useToast } from "@/hooks/use-toast";
 
 // Configurer otplib pour utiliser l'API Web Crypto du navigateur
 // Polyfill pour Buffer dans le navigateur
@@ -43,6 +44,7 @@ export default function Settings() {
   const { currentUser, logout, linkEmailPassword, linkGoogleAccount, deleteAccount } = useAuth();
   const { usageType, updateUsageType } = useUsageMode();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("general");
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
   const [showLinkEmailForm, setShowLinkEmailForm] = useState(false);
@@ -70,6 +72,56 @@ export default function Settings() {
   const [profileImageError, setProfileImageError] = useState(false);
   const [isUpdatingUsageType, setIsUpdatingUsageType] = useState(false);
   const [usageTypeError, setUsageTypeError] = useState("");
+
+  // Réinitialiser l'erreur d'image quand la photoURL change
+  useEffect(() => {
+    setProfileImageError(false);
+  }, [currentUser?.photoURL]);
+
+  // Charger l'état du 2FA depuis Firestore
+  useEffect(() => {
+    const load2FAStatus = async () => {
+      if (!currentUser || !db) return;
+
+      try {
+        const userRef = doc(db, "users", currentUser.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setTwoFactorEnabled(userData.twoFactorEnabled || false);
+        }
+      } catch (error) {
+        console.error("Erreur lors du chargement du statut 2FA:", error);
+      }
+    };
+
+    load2FAStatus();
+  }, [currentUser, db]);
+
+  // Charger les modes de paiement
+  useEffect(() => {
+    const loadPaymentMethods = async () => {
+      if (!currentUser || !db) {
+        setPaymentMethods([]);
+        return;
+      }
+
+      try {
+        const paymentMethodsRef = collection(db, "users", currentUser.uid, "paymentMethods");
+        const snapshot = await getDocs(paymentMethodsRef);
+        const methods = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as Array<{ id: string; type: string; label: string; last4?: string; expiryDate?: string }>;
+        setPaymentMethods(methods);
+      } catch (error) {
+        console.warn("Erreur lors du chargement des modes de paiement:", error);
+        setPaymentMethods([]);
+      }
+    };
+
+    loadPaymentMethods();
+  }, [currentUser, db]);
 
   const isGoogleAccount = currentUser?.providerData?.some(
     (provider) => provider.providerId === "google.com"
@@ -169,8 +221,7 @@ export default function Settings() {
 
       // Récupérer toutes les entreprises
       try {
-        // Utiliser une sous-collection : users/{userId}/companies
-        const companiesRef = collection(db, "users", userId, "companies");
+        const companiesRef = collection(db, "Users", userId, "data", "entreprise", "companies");
         const companiesSnapshot = await getDocs(companiesRef);
         allData.companies = companiesSnapshot.docs.map((doc) => ({
           id: doc.id,
@@ -231,11 +282,10 @@ export default function Settings() {
 
       // Supprimer toutes les entreprises
       try {
-        // Utiliser une sous-collection : users/{userId}/companies
-        const companiesRef = collection(db, "users", userId, "companies");
+        const companiesRef = collection(db, "Users", userId, "data", "entreprise", "companies");
         const companiesSnapshot = await getDocs(companiesRef);
         const deletePromises = companiesSnapshot.docs.map((docSnapshot) =>
-          deleteDoc(doc(db, "users", userId, "companies", docSnapshot.id))
+          deleteDoc(doc(db, "Users", userId, "data", "entreprise", "companies", docSnapshot.id))
         );
         await Promise.all(deletePromises);
       } catch (error) {
@@ -295,12 +345,32 @@ export default function Settings() {
       try {
         const response = await fetch(`/api/payment-methods?userId=${currentUser.uid}`);
         if (!response.ok) {
-          throw new Error("Erreur lors du chargement des modes de paiement");
+          // Si l'erreur est 500 ou autre, essayer de récupérer le message d'erreur
+          let errorMessage = "Erreur lors du chargement des modes de paiement";
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+          } catch {
+            // Si la réponse n'est pas du JSON, utiliser le message par défaut
+          }
+          
+          // Ne pas lancer d'erreur pour les erreurs réseau ou serveur temporaires
+          // Juste logger et continuer avec une liste vide
+          console.warn("Impossible de charger les modes de paiement:", errorMessage);
+          setPaymentMethods([]);
+          return;
         }
         const data = await response.json();
         setPaymentMethods(data.paymentMethods || []);
       } catch (error: any) {
-        console.error("Erreur lors du chargement des modes de paiement:", error);
+        // Erreur réseau (fetch failed) - ne pas spammer la console
+        // Juste initialiser avec une liste vide
+        if (error.name === "TypeError" && error.message.includes("fetch")) {
+          console.warn("Erreur réseau lors du chargement des modes de paiement. Le serveur est peut-être indisponible.");
+        } else {
+          console.error("Erreur lors du chargement des modes de paiement:", error);
+        }
+        setPaymentMethods([]);
       }
     };
 
@@ -1234,6 +1304,7 @@ export default function Settings() {
               </div>
             )}
 
+
             {activeTab === "billing" && (
               <div>
                 <h2 className="text-2xl font-bold text-foreground mb-6">
@@ -1384,6 +1455,21 @@ export default function Settings() {
                       </p>
                     </div>
                   )}
+                  <div className="pt-6 border-t border-border">
+                    <h3 className="text-lg font-semibold text-foreground mb-4">
+                      Détection d'anomalies
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Analysez vos transactions pour détecter les anomalies et les erreurs potentielles dans vos données financières.
+                    </p>
+                    <button
+                      onClick={() => navigate("/anomalies")}
+                      className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors font-medium"
+                    >
+                      <AlertCircle className="w-5 h-5" />
+                      <span>Voir les anomalies</span>
+                    </button>
+                  </div>
                   <div className="pt-6 border-t border-border">
                     <h3 className="text-lg font-semibold text-foreground mb-4">
                       {t("settings.twoFactorAuth")}

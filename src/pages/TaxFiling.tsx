@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import MainLayout from "../layouts/MainLayout";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -15,9 +15,19 @@ import {
   addVehicleJournalEntry,
   updateVehicleJournalEntry,
   deleteVehicleJournalEntry,
+  getHomeOfficeExpenses,
+  type HomeOfficeExpense,
+  upsertHomeOfficeExpense,
+  deleteHomeOfficeExpense,
+  getTechExpensesForm,
+  type TechExpenseFormData,
+  upsertTechExpenseForm,
+  deleteTechExpenseForm,
 } from "../lib/db";
 import { VehicleAnnualForm } from "../components/VehicleAnnualForm";
 import { VehicleExpenseForm } from "../components/VehicleExpenseForm";
+import { HomeOfficeForm } from "../components/HomeOfficeForm";
+import { TechExpenseForm } from "../components/Technoform";
 import { shouldRegisterForTaxes } from "../lib/taxRules";
 import {
   FileText,
@@ -62,6 +72,34 @@ export default function TaxFiling() {
   const [editingJournal, setEditingJournal] = useState<VehicleJournalEntry | null>(
     null
   );
+
+  const [homeOfficeData, setHomeOfficeData] = useState<HomeOfficeExpense[]>([]);
+  const [showHomeOfficeForm, setShowHomeOfficeForm] = useState(false);
+  const [editingHomeOffice, setEditingHomeOffice] = useState<HomeOfficeExpense | null>(null);
+
+  const [techData, setTechData] = useState<TechExpenseFormData[]>([]);
+  const [showTechForm, setShowTechForm] = useState(false);
+  const [editingTech, setEditingTech] = useState<TechExpenseFormData | null>(null);
+
+  // Fonction de chargement des dépenses bureau à domicile
+  const loadHomeOfficeData = useCallback(async () => {
+    try {
+      const data = await getHomeOfficeExpenses(selectedYear);
+      setHomeOfficeData(data);
+    } catch (error) {
+      console.error("Erreur lors du chargement des dépenses bureau à domicile:", error);
+    }
+  }, [selectedYear]);
+
+  // Fonction de chargement des dépenses techno
+  const loadTechData = useCallback(async () => {
+    try {
+      const data = await getTechExpensesForm(selectedYear);
+      setTechData(data);
+    } catch (error) {
+      console.error("Erreur lors du chargement des dépenses techno:", error);
+    }
+  }, [selectedYear]);
 
   // Chargement des données
   useEffect(() => {
@@ -112,6 +150,8 @@ export default function TaxFiling() {
         loadTransactions(),
         loadVehicleProfiles(),
         loadVehicleJournals(),
+        loadHomeOfficeData(),
+        loadTechData(),
       ]);
       setLoading(false);
     };
@@ -323,6 +363,99 @@ export default function TaxFiling() {
     setSelectedProfileId(null);
   };
 
+  // Handlers bureau à domicile
+  const handleSaveHomeOffice = async (data: {
+    id?: string;
+    periodStart: string;
+    periodEnd: string;
+    totalArea: number;
+    officeArea: number;
+    rent: number;
+    mortgageInterest: number;
+    electricityHeating: number;
+    condoFees: number;
+    propertyTaxes: number;
+    homeInsurance: number;
+    other: number;
+  }) => {
+    try {
+      const id = await upsertHomeOfficeExpense({
+        id: data.id,
+        periodStart: data.periodStart,
+        periodEnd: data.periodEnd,
+        totalArea: data.totalArea,
+        officeArea: data.officeArea,
+        rent: data.rent,
+        mortgageInterest: data.mortgageInterest,
+        electricityHeating: data.electricityHeating,
+        condoFees: data.condoFees,
+        propertyTaxes: data.propertyTaxes,
+        homeInsurance: data.homeInsurance,
+        other: data.other,
+        businessAreaRatio: 0,
+        totalExpenses: 0,
+        deductibleTotal: 0
+      });
+      if (id) {
+        console.log("✅ Dépense bureau à domicile enregistrée avec succès");
+        await loadHomeOfficeData();
+        setShowHomeOfficeForm(false);
+        setEditingHomeOffice(null);
+      }
+    } catch (error) {
+      console.error("❌ Erreur lors de l'enregistrement:", error);
+      alert("Erreur lors de l'enregistrement. Vérifiez la console pour plus de détails.");
+    }
+  };
+
+  const handleDeleteHomeOffice = async () => {
+    if (!editingHomeOffice) return;
+    if (!confirm("Êtes-vous sûr de vouloir supprimer cette dépense ?")) {
+      return;
+    }
+    try {
+      await deleteHomeOfficeExpense(editingHomeOffice.id);
+      await loadHomeOfficeData();
+      setShowHomeOfficeForm(false);
+      setEditingHomeOffice(null);
+    } catch (error) {
+      console.error("❌ Erreur lors de la suppression:", error);
+      alert("Erreur lors de la suppression.");
+    }
+  };
+
+  // Handlers dépenses techno
+  const handleSaveTech = async (data: TechExpenseFormData) => {
+    try {
+      const id = await upsertTechExpenseForm(data);
+      if (id) {
+        console.log("✅ Dépense techno enregistrée avec succès");
+        await loadTechData();
+        setShowTechForm(false);
+        setEditingTech(null);
+      }
+    } catch (error) {
+      console.error("❌ Erreur lors de l'enregistrement:", error);
+      alert("Erreur lors de l'enregistrement. Vérifiez la console pour plus de détails.");
+    }
+  };
+
+  const handleDeleteTech = async () => {
+    if (!editingTech?.id) return;
+    if (!confirm("Êtes-vous sûr de vouloir supprimer cette dépense ?")) {
+      return;
+    }
+    try {
+      await deleteTechExpenseForm(editingTech.id);
+      await loadTechData();
+      setShowTechForm(false);
+      setEditingTech(null);
+    } catch (error) {
+      console.error("❌ Erreur lors de la suppression:", error);
+      alert("Erreur lors de la suppression.");
+    }
+  };
+
   // Handlers journal
   const handleJournalSubmit = async (payload: {
     id?: string;
@@ -496,13 +629,13 @@ export default function TaxFiling() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">GST collectée:</span>
                   <span className="font-medium">
-                    {taxReturn.gstCollected.toFixed(2)} $
+                    {(taxReturn.gstCollected || 0).toFixed(2)} $
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">GST payée (ITC):</span>
                   <span className="font-medium text-green-600">
-                    -{taxReturn.gstPaid.toFixed(2)} $
+                    -{(taxReturn.gstPaid || 0).toFixed(2)} $
                   </span>
                 </div>
                 <div className="border-t border-border pt-2 mt-2 flex justify-between">
@@ -512,8 +645,8 @@ export default function TaxFiling() {
                       taxReturn.gstNet >= 0 ? "text-red-600" : "text-green-600"
                     }`}
                   >
-                    {taxReturn.gstNet >= 0 ? "+" : ""}
-                    {taxReturn.gstNet.toFixed(2)} $
+                    {(taxReturn.gstNet || 0) >= 0 ? "+" : ""}
+                    {(taxReturn.gstNet || 0).toFixed(2)} $
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
@@ -532,13 +665,13 @@ export default function TaxFiling() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">QST collectée:</span>
                   <span className="font-medium">
-                    {taxReturn.qstCollected.toFixed(2)} $
+                    {(taxReturn.qstCollected || 0).toFixed(2)} $
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">QST payée (ITC):</span>
                   <span className="font-medium text-green-600">
-                    -{taxReturn.qstPaid.toFixed(2)} $
+                    -{(taxReturn.qstPaid || 0).toFixed(2)} $
                   </span>
                 </div>
                 <div className="border-t border-border pt-2 mt-2 flex justify-between">
@@ -548,8 +681,8 @@ export default function TaxFiling() {
                       taxReturn.qstNet >= 0 ? "text-red-600" : "text-green-600"
                     }`}
                   >
-                    {taxReturn.qstNet >= 0 ? "+" : ""}
-                    {taxReturn.qstNet.toFixed(2)} $
+                    {(taxReturn.qstNet || 0) >= 0 ? "+" : ""}
+                    {(taxReturn.qstNet || 0).toFixed(2)} $
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
@@ -575,7 +708,7 @@ export default function TaxFiling() {
                 Total déductible véhicule (tous véhicules):
               </span>
               <span className="font-semibold text-emerald-700">
-                {totalVehicleDeductible.toFixed(2)} $
+                {(totalVehicleDeductible || 0).toFixed(2)} $
               </span>
             </div>
           </div>
@@ -624,19 +757,19 @@ export default function TaxFiling() {
                   <p className="text-muted-foreground">
                     Km totaux :{" "}
                     <span className="font-medium">
-                      {selectedProfile.totalKm.toFixed(0)} km
+                      {(selectedProfile.totalKm || 0).toFixed(0)} km
                     </span>
                   </p>
                   <p className="text-muted-foreground">
                     Km d&apos;affaires :{" "}
                     <span className="font-medium">
-                      {selectedProfile.businessKm.toFixed(0)} km
+                      {(selectedProfile.businessKm || 0).toFixed(0)} km
                     </span>
                   </p>
                   <p className="text-muted-foreground">
                     Ratio affaires :{" "}
                     <span className="font-medium">
-                      {(selectedProfile.businessRatio * 100).toFixed(1)} %
+                      {((selectedProfile.businessRatio || 0) * 100).toFixed(1)} %
                     </span>
                   </p>
                 </div>
@@ -645,13 +778,13 @@ export default function TaxFiling() {
                   <p className="text-muted-foreground">
                     Coûts annuels fixes :{" "}
                     <span className="font-medium">
-                      {selectedProfile.annualFixedCosts.toFixed(2)} $
+                      {(selectedProfile.annualFixedCosts || 0).toFixed(2)} $
                     </span>
                   </p>
                   <p className="text-muted-foreground">
                     Parking + autres (journal) :{" "}
                     <span className="font-medium">
-                      {selectedProfile.variableParkingAndOther.toFixed(2)} $
+                      {(selectedProfile.variableParkingAndOther || 0).toFixed(2)} $
                     </span>
                   </p>
                 </div>
@@ -661,7 +794,7 @@ export default function TaxFiling() {
                     Dépenses admissibles totales :
                   </p>
                   <p className="font-semibold text-emerald-700 text-base">
-                    {selectedProfile.deductibleTotal.toFixed(2)} $
+                    {(selectedProfile.deductibleTotal || 0).toFixed(2)} $
                   </p>
                 </div>
               </div>
@@ -730,17 +863,17 @@ export default function TaxFiling() {
                       <p className="text-muted-foreground">
                         Km d&apos;affaires :{" "}
                         <span className="font-medium">
-                          {entry.businessKm.toFixed(0)} km
+                          {(entry.businessKm || 0).toFixed(0)} km
                         </span>
                       </p>
                       <p className="text-muted-foreground">
                         Stationnement :{" "}
                         <span className="font-medium">
-                          {entry.parking.toFixed(2)} $
+                          {(entry.parking || 0).toFixed(2)} $
                         </span>{" "}
                         – Autres :{" "}
                         <span className="font-medium">
-                          {entry.other.toFixed(2)} $
+                          {(entry.other || 0).toFixed(2)} $
                         </span>
                       </p>
                       <p className="text-muted-foreground">
@@ -784,57 +917,149 @@ export default function TaxFiling() {
       {activeTab === "homeoffice" && (
         <div className="space-y-4">
           <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-            <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
-              <Home className="w-4 h-4" />
-              Bureau à domicile – {selectedYear}
-            </h2>
-            <p className="text-sm text-muted-foreground mb-2">
-              Résumé des dépenses liées au bureau à domicile basées sur les transactions
-              catégorisées comme &laquo; bureau &raquo; / &laquo; home office &raquo;.
-            </p>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
+                  <Home className="w-4 h-4" />
+                  Bureau à domicile – {selectedYear}
+                </h2>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Identifiez les coûts de votre domicile et calculez les dépenses admissibles
+                  basées sur le ratio d'utilisation pour le travail.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingHomeOffice(null);
+                  setShowHomeOfficeForm(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                Ajouter
+              </button>
+            </div>
             <div className="flex justify-between text-sm mt-2">
               <span className="text-muted-foreground">
-                Total des dépenses identifiées (bureau à domicile):
+                Total des dépenses identifiées (transactions):
               </span>
               <span className="font-semibold text-emerald-700">
-                {homeOfficeTotal.toFixed(2)} $
+                {(homeOfficeTotal || 0).toFixed(2)} $
               </span>
             </div>
           </div>
 
-          {homeOfficeExpenses.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Aucune dépense identifiée comme bureau à domicile pour {selectedYear}. Tu peux
-              utiliser des catégories ou des tags (ex. &laquo; bureau &raquo;,
-              &laquo; homeoffice &raquo;) dans tes transactions pour les faire apparaître ici.
-            </p>
-          ) : (
-            <div className="border border-border rounded-lg overflow-hidden text-xs">
-              <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted font-semibold">
-                <span>Date</span>
-                <span>Description</span>
-                <span>Catégorie / Tags</span>
-                <span className="text-right">Montant</span>
-              </div>
-              {homeOfficeExpenses.map((tx) => (
+          {/* Formulaire */}
+          {showHomeOfficeForm && (
+            <HomeOfficeForm
+              year={selectedYear}
+              initialExpense={editingHomeOffice}
+              onSave={handleSaveHomeOffice}
+              onDelete={editingHomeOffice ? handleDeleteHomeOffice : undefined}
+              onClose={() => {
+                setShowHomeOfficeForm(false);
+                setEditingHomeOffice(null);
+              }}
+            />
+          )}
+
+          {/* Liste des dépenses bureau à domicile */}
+          {homeOfficeData.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-md font-semibold text-foreground">
+                Dépenses calculées ({homeOfficeData.length})
+              </h3>
+              {homeOfficeData.map((expense) => (
                 <div
-                  key={tx.id}
-                  className="grid grid-cols-4 gap-2 px-3 py-2 border-t border-border/60"
+                  key={expense.id}
+                  className="bg-card rounded-lg border border-border p-4 shadow-sm"
                 >
-                  <span className="truncate">{tx.date}</span>
-                  <span className="truncate">{tx.description || "-"}</span>
-                  <span className="truncate text-muted-foreground">
-                    {tx.category || ""}
-                    {tx.tags && tx.tags.length > 0
-                      ? ` • ${tx.tags.join(", ")}`
-                      : ""}
-                  </span>
-                  <span className="text-right font-medium">
-                    {tx.amount.toFixed(2)} $
-                  </span>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-semibold text-foreground">
+                          {expense.periodStart} → {expense.periodEnd}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        <div>
+                          <p className="text-muted-foreground">Superficie totale</p>
+                          <p className="font-medium">{expense.totalArea} pi²</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Superficie bureau</p>
+                          <p className="font-medium">{expense.officeArea} pi²</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Ratio d'utilisation</p>
+                          <p className="font-medium">
+                            {(expense.businessAreaRatio * 100).toFixed(2)}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Total déductible</p>
+                          <p className="font-semibold text-emerald-700">
+                            {expense.deductibleTotal.toFixed(2)} $
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingHomeOffice(expense);
+                        setShowHomeOfficeForm(true);
+                      }}
+                      className="ml-4 px-3 py-1 text-sm border border-border rounded-lg hover:bg-secondary transition-colors"
+                    >
+                      Modifier
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
+          )}
+
+          {/* Transactions identifiées */}
+          {homeOfficeExpenses.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-md font-semibold text-foreground mb-3">
+                Transactions identifiées comme bureau à domicile
+              </h3>
+              <div className="border border-border rounded-lg overflow-hidden text-xs">
+                <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted font-semibold">
+                  <span>Date</span>
+                  <span>Description</span>
+                  <span>Catégorie / Tags</span>
+                  <span className="text-right">Montant</span>
+                </div>
+                {homeOfficeExpenses.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="grid grid-cols-4 gap-2 px-3 py-2 border-t border-border/60"
+                  >
+                    <span className="truncate">{tx.date}</span>
+                    <span className="truncate">{tx.description || "-"}</span>
+                    <span className="truncate text-muted-foreground">
+                      {tx.category || ""}
+                      {tx.tags && tx.tags.length > 0
+                        ? ` • ${tx.tags.join(", ")}`
+                        : ""}
+                    </span>
+                    <span className="text-right font-medium">
+                      {(tx.amount || 0).toFixed(2)} $
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {homeOfficeData.length === 0 && !showHomeOfficeForm && (
+            <p className="text-xs text-muted-foreground text-center py-8">
+              Aucune dépense bureau à domicile enregistrée pour {selectedYear}. Cliquez sur
+              "Ajouter" pour identifier les coûts de votre domicile et calculer les dépenses
+              admissibles.
+            </p>
           )}
         </div>
       )}
@@ -843,57 +1068,149 @@ export default function TaxFiling() {
       {activeTab === "tech" && (
         <div className="space-y-4">
           <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-            <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
-              <Cpu className="w-4 h-4" />
-              Technologie – {selectedYear}
-            </h2>
-            <p className="text-sm text-muted-foreground mb-2">
-              Résumé des dépenses technologiques (logiciels, abonnements, matériel,
-              services cloud) identifiées dans tes transactions.
-            </p>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
+                  <Cpu className="w-4 h-4" />
+                  Technologie – {selectedYear}
+                </h2>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Enregistrez vos dépenses technologiques et calculez les montants déductibles
+                  selon le pourcentage d'utilisation professionnelle.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingTech(null);
+                  setShowTechForm(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                Ajouter
+              </button>
+            </div>
             <div className="flex justify-between text-sm mt-2">
               <span className="text-muted-foreground">
-                Total des dépenses technologiques:
+                Total des dépenses identifiées (transactions):
               </span>
               <span className="font-semibold text-emerald-700">
-                {techTotal.toFixed(2)} $
+                {(techTotal || 0).toFixed(2)} $
               </span>
             </div>
           </div>
 
-          {techExpenses.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Aucune dépense catégorisée comme technologique pour {selectedYear}. Utilise des
-              catégories ou tags (ex. &laquo; tech &raquo;, &laquo; logiciel &raquo;,
-              &laquo; saas &raquo;) dans tes transactions pour les faire apparaître ici.
-            </p>
-          ) : (
-            <div className="border border-border rounded-lg overflow-hidden text-xs">
-              <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted font-semibold">
-                <span>Date</span>
-                <span>Description</span>
-                <span>Catégorie / Tags</span>
-                <span className="text-right">Montant</span>
-              </div>
-              {techExpenses.map((tx) => (
-                <div
-                  key={tx.id}
-                  className="grid grid-cols-4 gap-2 px-3 py-2 border-t border-border/60"
-                >
-                  <span className="truncate">{tx.date}</span>
-                  <span className="truncate">{tx.description || "-"}</span>
-                  <span className="truncate text-muted-foreground">
-                    {tx.category || ""}
-                    {tx.tags && tx.tags.length > 0
-                      ? ` • ${tx.tags.join(", ")}`
-                      : ""}
-                  </span>
-                  <span className="text-right font-medium">
-                    {tx.amount.toFixed(2)} $
-                  </span>
-                </div>
-              ))}
+          {/* Formulaire */}
+          {showTechForm && (
+            <TechExpenseForm
+              initial={editingTech}
+              onSave={handleSaveTech}
+              onDelete={editingTech ? handleDeleteTech : undefined}
+              onClose={() => {
+                setShowTechForm(false);
+                setEditingTech(null);
+              }}
+            />
+          )}
+
+          {/* Liste des dépenses techno enregistrées */}
+          {techData.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-md font-semibold text-foreground">
+                Dépenses enregistrées ({techData.length})
+              </h3>
+              {techData.map((expense) => {
+                const deductible = expense.amount * (expense.businessUsage / 100);
+                return (
+                  <div
+                    key={expense.id}
+                    className="bg-card rounded-lg border border-border p-4 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="font-semibold text-foreground">
+                            {expense.date}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            {expense.category}
+                          </span>
+                        </div>
+                        <p className="text-sm text-foreground mb-2">{expense.description}</p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div>
+                            <p className="text-muted-foreground">Montant total</p>
+                            <p className="font-medium">{expense.amount.toFixed(2)} $</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Usage professionnel</p>
+                            <p className="font-medium">{expense.businessUsage}%</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Montant déductible</p>
+                            <p className="font-semibold text-emerald-700">
+                              {deductible.toFixed(2)} $
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditingTech(expense);
+                          setShowTechForm(true);
+                        }}
+                        className="ml-4 px-3 py-1 text-sm border border-border rounded-lg hover:bg-secondary transition-colors"
+                      >
+                        Modifier
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          )}
+
+          {/* Transactions identifiées */}
+          {techExpenses.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-md font-semibold text-foreground mb-3">
+                Transactions identifiées comme technologiques
+              </h3>
+              <div className="border border-border rounded-lg overflow-hidden text-xs">
+                <div className="grid grid-cols-4 gap-2 px-3 py-2 bg-muted font-semibold">
+                  <span>Date</span>
+                  <span>Description</span>
+                  <span>Catégorie / Tags</span>
+                  <span className="text-right">Montant</span>
+                </div>
+                {techExpenses.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="grid grid-cols-4 gap-2 px-3 py-2 border-t border-border/60"
+                  >
+                    <span className="truncate">{tx.date}</span>
+                    <span className="truncate">{tx.description || "-"}</span>
+                    <span className="truncate text-muted-foreground">
+                      {tx.category || ""}
+                      {tx.tags && tx.tags.length > 0
+                        ? ` • ${tx.tags.join(", ")}`
+                        : ""}
+                    </span>
+                    <span className="text-right font-medium">
+                      {(tx.amount || 0).toFixed(2)} $
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {techData.length === 0 && !showTechForm && (
+            <p className="text-xs text-muted-foreground text-center py-8">
+              Aucune dépense technologique enregistrée pour {selectedYear}. Cliquez sur
+              "Ajouter" pour enregistrer vos dépenses technologiques et calculer les montants
+              déductibles.
+            </p>
           )}
         </div>
       )}

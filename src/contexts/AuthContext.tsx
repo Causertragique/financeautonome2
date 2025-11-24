@@ -434,6 +434,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     deleteAccount,
   };
 
-  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
+  // Toujours rendre les enfants, même pendant le chargement
+  // Cela permet aux pages publiques (Privacy, Terms) de fonctionner
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

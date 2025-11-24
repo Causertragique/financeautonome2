@@ -372,12 +372,8 @@ export async function updateTransaction(
       return false;
     }
 
-    const transactionData = transactionDoc.data() as any;
-    if (transactionData.userId !== userId) {
-      console.error("❌ Accès refusé - La transaction n'appartient pas à l'utilisateur");
-      return false;
-    }
-
+    // La vérification de sécurité est assurée par le chemin Firestore
+    // users/{userId}/data/{mode}/transactions/{transactionId}
     const cleanedUpdates: any = {
       date: updates.date,
       description: updates.description || "",
@@ -464,12 +460,8 @@ export async function deleteTransaction(transactionId: string): Promise<boolean>
       return false;
     }
 
-    const transactionData = transactionDoc.data() as any;
-    if (transactionData.userId !== userId) {
-      console.error("❌ Accès refusé - La transaction n'appartient pas à l'utilisateur");
-      return false;
-    }
-
+    // La vérification de sécurité est assurée par le chemin Firestore
+    // users/{userId}/data/{mode}/transactions/{transactionId}
     await deleteDoc(transactionRef);
     console.log("✅ Transaction supprimée avec succès");
     window.dispatchEvent(new Event("transactionsUpdated"));
@@ -1090,6 +1082,7 @@ export interface HomeOfficeExpense {
   officeArea: number;
   businessAreaRatio: number;
   rent: number;
+  mortgageInterest: number;
   electricityHeating: number;
   condoFees: number;
   propertyTaxes: number;
@@ -1150,6 +1143,96 @@ export async function getHomeOfficeExpenses(
       error
     );
     return [];
+  }
+}
+
+export async function upsertHomeOfficeExpense(
+  expense: Omit<HomeOfficeExpense, "id" | "userId"> & { id?: string }
+): Promise<string | null> {
+  if (!db) {
+    console.warn("❌ Firestore non initialisé");
+    return null;
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      console.error("❌ Utilisateur non authentifié");
+      return null;
+    }
+
+    const currentMode = getCurrentMode();
+    const id = expense.id || nanoid();
+
+    // Calculer le ratio d'affaires
+    const businessAreaRatio =
+      expense.totalArea > 0 ? expense.officeArea / expense.totalArea : 0;
+
+    // Calculer le total des dépenses (loyer OU intérêts hypothécaires, pas les deux)
+    const totalExpenses =
+      (expense.rent || 0) +
+      (expense.mortgageInterest || 0) +
+      (expense.electricityHeating || 0) +
+      (expense.condoFees || 0) +
+      (expense.propertyTaxes || 0) +
+      (expense.homeInsurance || 0) +
+      (expense.other || 0);
+
+    // Calculer le total déductible (total * ratio)
+    const deductibleTotal = totalExpenses * businessAreaRatio;
+
+    const expenseData: Omit<HomeOfficeExpense, "id" | "userId"> = {
+      periodStart: expense.periodStart,
+      periodEnd: expense.periodEnd,
+      totalArea: expense.totalArea || 0,
+      officeArea: expense.officeArea || 0,
+      businessAreaRatio,
+      rent: expense.rent || 0,
+      mortgageInterest: expense.mortgageInterest || 0,
+      electricityHeating: expense.electricityHeating || 0,
+      condoFees: expense.condoFees || 0,
+      propertyTaxes: expense.propertyTaxes || 0,
+      homeInsurance: expense.homeInsurance || 0,
+      other: expense.other || 0,
+      totalExpenses,
+      deductibleTotal,
+    };
+
+    const expenseRef = getDocRef("homeOfficeExpenses", userId, currentMode, id);
+    await setDoc(expenseRef, expenseData);
+
+    console.log("✅ Dépense bureau à domicile enregistrée avec succès");
+    return id;
+  } catch (error: any) {
+    console.error("❌ Erreur lors de l'enregistrement de la dépense bureau:", error);
+    return null;
+  }
+}
+
+export async function deleteHomeOfficeExpense(expenseId: string): Promise<boolean> {
+  if (!db) {
+    console.warn("❌ Firestore non initialisé");
+    return false;
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      console.error("❌ Utilisateur non authentifié");
+      return false;
+    }
+
+    const currentMode = getCurrentMode();
+    const expenseRef = getDocRef("homeOfficeExpenses", userId, currentMode, expenseId);
+    await deleteDoc(expenseRef);
+
+    console.log("✅ Dépense bureau à domicile supprimée avec succès");
+    return true;
+  } catch (error: any) {
+    console.error("❌ Erreur lors de la suppression de la dépense bureau:", error);
+    return false;
   }
 }
 
@@ -1224,6 +1307,157 @@ export async function getTechExpenses(
       "❌ Erreur lors de la récupération des dépenses techno:",
       error
     );
+    return [];
+  }
+}
+
+// Interface pour les dépenses techno du formulaire
+export interface TechExpenseFormData {
+  id?: string;
+  date: string;
+  description: string;
+  category:
+    | "Matériel informatique"
+    | "Accessoires"
+    | "Téléphone cellulaire"
+    | "Logiciel (achat)"
+    | "Abonnement logiciel"
+    | "Abonnement service numérique"
+    | "Cloud/stockage"
+    | "Maintenance/réparation"
+    | "Autre";
+  amount: number;
+  businessUsage: number; // 0 à 100
+}
+
+export async function upsertTechExpenseForm(
+  expense: TechExpenseFormData
+): Promise<string | null> {
+  if (!db) {
+    console.warn("❌ Firestore non initialisé");
+    return null;
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      console.error("❌ Utilisateur non authentifié");
+      return null;
+    }
+
+    const currentMode = getCurrentMode();
+    const id = expense.id || nanoid();
+
+    // Calculer le montant déductible
+    const deductibleAmount = expense.amount * (expense.businessUsage / 100);
+
+    // Déterminer la période (année de la date)
+    const expenseDate = new Date(expense.date);
+    const year = expenseDate.getFullYear();
+    const periodStart = `${year}-01-01`;
+    const periodEnd = `${year}-12-31`;
+
+    const expenseData = {
+      id,
+      userId,
+      date: expense.date,
+      description: expense.description,
+      category: expense.category,
+      amount: expense.amount,
+      businessUsage: expense.businessUsage,
+      deductibleAmount,
+      periodStart,
+      periodEnd,
+      mode: currentMode,
+      createdAt: expense.id ? undefined : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const expenseRef = getDocRef("techExpenses", userId, currentMode, id);
+    await setDoc(expenseRef, expenseData);
+
+    console.log("✅ Dépense techno enregistrée avec succès");
+    return id;
+  } catch (error: any) {
+    console.error("❌ Erreur lors de l'enregistrement de la dépense techno:", error);
+    return null;
+  }
+}
+
+export async function deleteTechExpenseForm(expenseId: string): Promise<boolean> {
+  if (!db) {
+    console.warn("❌ Firestore non initialisé");
+    return false;
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      console.error("❌ Utilisateur non authentifié");
+      return false;
+    }
+
+    const currentMode = getCurrentMode();
+    const expenseRef = getDocRef("techExpenses", userId, currentMode, expenseId);
+    await deleteDoc(expenseRef);
+
+    console.log("✅ Dépense techno supprimée avec succès");
+    return true;
+  } catch (error: any) {
+    console.error("❌ Erreur lors de la suppression de la dépense techno:", error);
+    return false;
+  }
+}
+
+export async function getTechExpensesForm(
+  year: number
+): Promise<TechExpenseFormData[]> {
+  if (!db) {
+    console.warn("❌ Firestore non initialisé");
+    return [];
+  }
+
+  try {
+    const auth = getAuth();
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      console.warn("❌ Utilisateur non authentifié");
+      return [];
+    }
+
+    const currentMode = getCurrentMode();
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+
+    const expensesRef = getCollectionRef("techExpenses", userId, currentMode);
+    const q = query(expensesRef);
+
+    const snapshot = await getDocs(q);
+    const expenses: TechExpenseFormData[] = [];
+
+    snapshot.forEach((d) => {
+      const data = d.data();
+      // Filtrer par période et vérifier que c'est une dépense du formulaire (a les champs date, description, category)
+      if (data.date && data.description && data.category) {
+        const expenseDate = data.date;
+        if (expenseDate >= startDate && expenseDate <= endDate) {
+          expenses.push({
+            id: d.id,
+            date: data.date,
+            description: data.description,
+            category: data.category,
+            amount: data.amount || 0,
+            businessUsage: data.businessUsage || 100,
+          } as TechExpenseFormData);
+        }
+      }
+    });
+
+    return expenses.sort((a, b) => b.date.localeCompare(a.date));
+  } catch (error: any) {
+    console.error("❌ Erreur lors de la récupération des dépenses techno:", error);
     return [];
   }
 }

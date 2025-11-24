@@ -122,11 +122,6 @@ export default function MainLayout({ children }: MainLayoutProps) {
       icon: FileText,
     },
     {
-      name: t("sidebar.anomalies"),
-      href: "/anomalies",
-      icon: AlertTriangle,
-    },
-    {
       name: t("sidebar.assets"),
       href: "/assets",
       icon: Package,
@@ -230,80 +225,77 @@ export default function MainLayout({ children }: MainLayoutProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-6 space-y-1 overflow-hidden">
+        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
           {/* Dropdown pour basculer entre personnelle et entreprise (si usageType = "both") */}
           {!usageModeLoading && usageType === "both" && (
-            <div className="mb-4 px-4">
-              <div className="bg-white/10 border border-white/20 rounded-lg p-2">
-                <label className="text-xs text-white/70 mb-2 block px-2">Mode d'utilisation</label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-white/10 transition-colors text-left group">
-                      <div className="flex items-center gap-2">
-                        {currentMode === "business" ? (
-                          <Briefcase className="w-4 h-4 text-white" />
-                        ) : (
-                          <Wallet className="w-4 h-4 text-white" />
-                        )}
-                        <span className="text-white text-sm font-medium">
-                          {currentMode === "business" ? t("header.modeBusiness") : t("header.modePersonal")}
-                        </span>
-                      </div>
-                      <ChevronDown className="w-4 h-4 text-white/70 group-hover:text-white transition-colors" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56 bg-[hsl(222.2,47.4%,11.2%)] border-white/20 shadow-xl z-50">
-                    <DropdownMenuItem
-                      onClick={() => {
-                        if (currentMode !== "business") {
-                          setCurrentMode("business");
-                          window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "business" } }));
-                        }
-                      }}
-                      className={`flex items-center gap-3 cursor-pointer py-2.5 ${
-                        currentMode === "business" 
-                          ? "bg-sidebar-primary/30 text-white font-medium" 
-                          : "text-white/90 hover:bg-white/10 hover:text-white"
-                      }`}
-                    >
-                      <Briefcase className="w-4 h-4" />
-                      <span className="flex-1">{t("header.modeBusiness")}</span>
-                      {currentMode === "business" && (
-                        <CheckCircle2 className="w-4 h-4 text-sidebar-primary" />
+            <div className="mb-3 px-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-white/10 transition-colors text-left group">
+                    <div className="flex items-center gap-2">
+                      {currentMode === "business" ? (
+                        <Briefcase className="w-3.5 h-3.5 text-white" />
+                      ) : (
+                        <Wallet className="w-3.5 h-3.5 text-white" />
                       )}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        if (currentMode !== "personal") {
-                          setCurrentMode("personal");
-                          window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "personal" } }));
-                        }
-                      }}
-                      className={`flex items-center gap-3 cursor-pointer py-2.5 ${
-                        currentMode === "personal" 
-                          ? "bg-sidebar-primary/30 text-white font-medium" 
-                          : "text-white/90 hover:bg-white/10 hover:text-white"
-                      }`}
-                    >
-                      <Wallet className="w-4 h-4" />
-                      <span className="flex-1">{t("header.modePersonal")}</span>
-                      {currentMode === "personal" && (
-                        <CheckCircle2 className="w-4 h-4 text-sidebar-primary" />
-                      )}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                      <span className="text-white text-xs font-medium">
+                        {currentMode === "business" ? t("header.modeBusiness") : t("header.modePersonal")}
+                      </span>
+                    </div>
+                    <ChevronDown className="w-3 h-3 text-white/70 group-hover:text-white transition-colors" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-48 bg-[hsl(222.2,47.4%,11.2%)] border-white/20 shadow-xl z-50">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (currentMode !== "business") {
+                        setCurrentMode("business");
+                        window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "business" } }));
+                      }
+                    }}
+                    className={`flex items-center gap-2 cursor-pointer py-1.5 text-xs ${
+                      currentMode === "business" 
+                        ? "bg-sidebar-primary/30 text-white font-medium" 
+                        : "text-white/90 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    <Briefcase className="w-3.5 h-3.5" />
+                    <span className="flex-1">{t("header.modeBusiness")}</span>
+                    {currentMode === "business" && (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-sidebar-primary" />
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (currentMode !== "personal") {
+                        setCurrentMode("personal");
+                        window.dispatchEvent(new CustomEvent("modeChanged", { detail: { mode: "personal" } }));
+                      }
+                    }}
+                    className={`flex items-center gap-2 cursor-pointer py-1.5 text-xs ${
+                      currentMode === "personal" 
+                        ? "bg-sidebar-primary/30 text-white font-medium" 
+                        : "text-white/90 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span className="flex-1">{t("header.modePersonal")}</span>
+                    {currentMode === "personal" && (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-sidebar-primary" />
+                    )}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
           
           {/* Sélecteur d'année fiscale (uniquement pour entreprise) */}
           {sidebarOpen && (usageType === "business" || (usageType === "both" && currentMode === "business")) && (
-            <div className="mb-4 px-4">
+            <div className="mb-3 px-2">
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
-                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-sidebar-primary cursor-pointer hover:bg-white/15 transition-colors"
+                className="w-full px-2 py-1.5 bg-white/10 border border-white/20 rounded-lg text-white text-xs font-medium focus:outline-none focus:ring-2 focus:ring-sidebar-primary cursor-pointer hover:bg-white/15 transition-colors"
                 aria-label={t("header.selectFiscalYear")}
                 title={t("header.selectFiscalYear")}
               >
@@ -354,14 +346,21 @@ export default function MainLayout({ children }: MainLayoutProps) {
 
         {/* Footer */}
         {sidebarOpen && (
-          <div className="p-4 border-t border-sidebar-border/50">
-            <div className="bg-gradient-to-br from-sidebar-accent/15 to-sidebar-primary/10 rounded-2xl p-4 border border-sidebar-border/30 shadow-lg">
-              <p className="text-xs font-bold text-white mb-1.5">
-                {t("sidebar.footer")}
-              </p>
-              <p className="text-xs text-white/80 font-medium">
-                {t("sidebar.footerTagline")}
-              </p>
+          <div className="p-3 border-t border-sidebar-border/50">
+            <div className="flex gap-3 justify-center">
+              <Link
+                to="/privacy"
+                className="text-xs text-white/70 hover:text-white transition-colors underline"
+              >
+                Confidentialité
+              </Link>
+              <span className="text-xs text-white/50">•</span>
+              <Link
+                to="/terms"
+                className="text-xs text-white/70 hover:text-white transition-colors underline"
+              >
+                Conditions
+              </Link>
             </div>
           </div>
         )}
