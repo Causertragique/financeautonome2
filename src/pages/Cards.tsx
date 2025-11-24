@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import MainLayout from "../layouts/MainLayout";
+import { useLanguage } from "../contexts/LanguageContext";
 import { Plus, CreditCard, TrendingUp, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +45,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ value, className = "" }) => {
 };
 
 export default function Cards() {
+  const { t } = useLanguage();
   const [showAddCard, setShowAddCard] = useState(false);
   const [cards, setCards] = useState<Array<{
     id: string;
@@ -72,9 +74,9 @@ export default function Cards() {
   return (
     <MainLayout>
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Cartes de crédit</h1>
+        <h1 className="text-3xl font-bold text-foreground mb-2">{t("cards.title")}</h1>
         <p className="text-muted-foreground">
-          Gérez vos cartes de crédit et suivez vos dépenses
+          {t("cards.subtitle")}
         </p>
       </div>
 
@@ -82,19 +84,19 @@ export default function Cards() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Solde total</CardTitle>
+            <CardTitle className="text-sm font-medium">{t("cards.totalBalance")}</CardTitle>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-destructive">
               {totalBalance.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
             </div>
-            <p className="text-xs text-muted-foreground">Sur {cards.length} carte{cards.length > 1 ? "s" : ""}</p>
+            <p className="text-xs text-muted-foreground">{cards.length > 1 ? t("cards.onCardsPlural").replace("{count}", cards.length.toString()) : t("cards.onCardsSingular").replace("{count}", cards.length.toString())}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Crédit disponible</CardTitle>
+            <CardTitle className="text-sm font-medium">{t("cards.availableCredit")}</CardTitle>
             <TrendingUp className="h-4 w-4 text-success" />
           </CardHeader>
           <CardContent>
@@ -102,20 +104,20 @@ export default function Cards() {
               {availableCredit.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
             </div>
             <p className="text-xs text-muted-foreground">
-              {((availableCredit / totalCreditLimit) * 100).toFixed(0)}% disponible
+              {((availableCredit / totalCreditLimit) * 100).toFixed(0)}% {t("cards.available")}
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Limite totale</CardTitle>
+            <CardTitle className="text-sm font-medium">{t("cards.totalLimit")}</CardTitle>
             <AlertCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
               {totalCreditLimit.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
             </div>
-            <p className="text-xs text-muted-foreground">Toutes cartes confondues</p>
+            <p className="text-xs text-muted-foreground">{t("cards.allCards")}</p>
           </CardContent>
         </Card>
       </div>
@@ -125,12 +127,12 @@ export default function Cards() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Mes cartes</CardTitle>
-              <CardDescription>Vue d'ensemble de vos cartes de crédit</CardDescription>
+              <CardTitle>{t("cards.myCards")}</CardTitle>
+              <CardDescription>{t("cards.overview")}</CardDescription>
             </div>
             <Button onClick={() => setShowAddCard(true)}>
               <Plus className="w-4 h-4 mr-2" />
-              Ajouter une carte
+              {t("cards.addCard")}
             </Button>
           </div>
         </CardHeader>
@@ -191,7 +193,7 @@ export default function Cards() {
                         </div>
                       </div>
                       <div>
-                        <p className="text-sm text-muted-foreground">Date d'échéance</p>
+                        <p className="text-sm text-muted-foreground">{t("cards.dueDate")}</p>
                         <p className="font-medium">{new Date(card.dueDate).toLocaleDateString("fr-CA")}</p>
                       </div>
                     </div>
@@ -207,15 +209,15 @@ export default function Cards() {
       <Dialog open={showAddCard} onOpenChange={setShowAddCard}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ajouter une carte de crédit</DialogTitle>
+            <DialogTitle>{t("cards.addCardTitle")}</DialogTitle>
             <DialogDescription>
-              Ajoutez une nouvelle carte de crédit à votre profil
+              {t("cards.addCardDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="card-name">Nom de la carte</Label>
-              <Input id="card-name" placeholder="Ex: Visa Desjardins Cashback" />
+              <Label htmlFor="card-name">{t("cards.cardName")}</Label>
+              <Input id="card-name" placeholder={t("cards.cardNamePlaceholder")} />
             </div>
             <div>
               <Label htmlFor="card-type">Type de carte</Label>
@@ -246,9 +248,9 @@ export default function Cards() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddCard(false)}>
-              Annuler
+              {t("cards.cancel")}
             </Button>
-            <Button onClick={() => setShowAddCard(false)}>Ajouter</Button>
+            <Button onClick={() => setShowAddCard(false)}>{t("cards.add")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

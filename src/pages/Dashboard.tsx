@@ -778,7 +778,7 @@ export default function Dashboard() {
 
     expenseTransactions.forEach((transaction) => {
       // Utiliser la catégorie telle quelle (pas de traduction pour éviter les clés)
-      const category = transaction.category || "Autre";
+      const category = transaction.category || t("dashboard.categoryOther");
       categoryTotals[category] = (categoryTotals[category] || 0) + Math.abs(transaction.amount);
     });
 
@@ -888,14 +888,14 @@ export default function Dashboard() {
     {
       label: `${t("dashboard.revenue")} ${selectedYear}`,
       value: shouldShowMockData ? "24,590 $" : `${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`,
-      change: shouldShowMockData ? "+12.5%" : budgetedIncome > 0 ? `${incomeVsBudget}% vs budget` : "0%",
+      change: shouldShowMockData ? "+12.5%" : budgetedIncome > 0 ? `${incomeVsBudget}% ${t("dashboard.vsBudget")}` : "0%",
       positive: true,
       icon: TrendingUp,
-      budget: budgetedIncome > 0 ? `Budget: ${budgetedIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $` : undefined,
+      budget: budgetedIncome > 0 ? `${t("dashboard.budget")}: ${budgetedIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $` : undefined,
     },
     // Afficher le salaire uniquement en mode personnel et si un salaire est défini
     ...(isPersonalMode && salaryInfo ? [{
-      label: "Salaire",
+      label: t("dashboard.salary"),
       value: salaryInfo.annual.toLocaleString("en-US", { minimumFractionDigits: 2 }) + " $",
       change: salaryInfo.display,
       positive: true,
@@ -904,10 +904,10 @@ export default function Dashboard() {
     {
       label: `${t("dashboard.expenses")} ${selectedYear}`,
       value: shouldShowMockData ? "18,420 $" : `${totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`,
-      change: shouldShowMockData ? "-5.2%" : budgetedExpenses > 0 ? `${expensesVsBudget}% vs budget` : "0%",
+      change: shouldShowMockData ? "-5.2%" : budgetedExpenses > 0 ? `${expensesVsBudget}% ${t("dashboard.vsBudget")}` : "0%",
       positive: true,
       icon: TrendingDown,
-      budget: budgetedExpenses > 0 ? `Budget: ${budgetedExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })} $` : undefined,
+      budget: budgetedExpenses > 0 ? `${t("dashboard.budget")}: ${budgetedExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })} $` : undefined,
     },
     {
       label: `${t("dashboard.income")} ${selectedYear}`,
@@ -1011,7 +1011,7 @@ export default function Dashboard() {
             value={selectedPeriod}
             onChange={(e) => setSelectedPeriod(e.target.value)}
             className="bg-transparent border-none text-foreground text-sm font-medium focus:outline-none cursor-pointer"
-            aria-label="Sélectionner la période"
+            aria-label={t("dashboard.selectPeriod")}
           >
             <option value="mtd">{t("dashboard.periodThisMonth")}</option>
             <option value="qtd">{t("dashboard.periodThisQuarter")}</option>
@@ -1071,7 +1071,7 @@ export default function Dashboard() {
               <Line
                 type="monotone"
                 dataKey="revenue"
-                name="Revenu"
+                name={t("dashboard.revenuLabel")}
                 stroke="hsl(var(--success))"
                 strokeWidth={3}
                 dot={{ fill: "hsl(var(--success))", r: 4 }}
@@ -1080,7 +1080,7 @@ export default function Dashboard() {
               <Line
                 type="monotone"
                 dataKey="expenses"
-                name="Dépense"
+                name={t("dashboard.expensesLabel")}
                 stroke="hsl(var(--destructive))"
                 strokeWidth={3}
                 dot={{ fill: "hsl(var(--destructive))", r: 4 }}
@@ -1117,7 +1117,7 @@ export default function Dashboard() {
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value: number) => [`${value}%`, "Pourcentage"]}
+                formatter={(value: number) => [`${value}%`, t("dashboard.percentage")]}
                 labelFormatter={(label) => {
                   // Trouver le nom complet depuis les données
                   const entry = categoryData.find((d) => d.name === label || d.name.startsWith(label));
@@ -1177,14 +1177,14 @@ export default function Dashboard() {
             <Legend />
             <Bar
               dataKey="revenue"
-              name="Revenu"
+              name={t("dashboard.revenuLabel")}
               fill="hsl(var(--success))"
               radius={[8, 8, 0, 0]}
               opacity={0.9}
             />
             <Bar
               dataKey="expenses"
-              name="Dépense"
+              name={t("dashboard.expensesLabel")}
               fill="hsl(var(--destructive))"
               radius={[8, 8, 0, 0]}
               opacity={0.9}
@@ -1343,7 +1343,7 @@ export default function Dashboard() {
               ) : (
                 <tr>
                   <td colSpan={5} className="py-4 px-4 text-center text-xs text-muted-foreground">
-                    Aucune transaction pour cette année
+                    {t("dashboard.noTransactions")}
                   </td>
                 </tr>
               )}

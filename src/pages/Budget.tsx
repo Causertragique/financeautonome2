@@ -6,6 +6,7 @@ import { db } from "../lib/firebase";
 import { collection, getDocs, doc, setDoc, deleteDoc, getDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { useUsageMode } from "../contexts/UsageModeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { addTransaction, getTransactions, type Transaction } from "../lib/db";
 import { classifyTransaction, calculateTaxes, validateExpense } from "../lib/taxRules";
 
@@ -330,6 +331,7 @@ async function deleteVariableExpense(userId: string, mode: "business" | "persona
 ----------------------------------------------------- */
 export default function Budget() {
   const { usageType } = useUsageMode();
+  const { t } = useLanguage();
   const auth = getAuth();
   const userId = auth.currentUser?.uid;
   const currentMode = usageType === "both" ? (localStorage.getItem(`usageMode_${userId}`) as "business" | "personal" || "business") : (usageType || "business");
@@ -441,7 +443,7 @@ export default function Budget() {
             }
             data[dateKey].revenu += salary;
             data[dateKey].items.push({
-              name: "Salaire (aux 2 semaines)",
+              name: t("budget.biweeklySalary"),
               amount: salary,
               type: 'revenu'
             });
@@ -460,7 +462,7 @@ export default function Budget() {
         }
         data[dateKey].revenu += monthlyIncome;
         data[dateKey].items.push({
-          name: "Salaire mensuel",
+              name: t("budget.monthlySalary"),
           amount: monthlyIncome,
           type: 'revenu'
         });
@@ -576,7 +578,7 @@ export default function Budget() {
           if (isrevenu) {
             data[dateKey].revenu += transaction.amount;
             data[dateKey].items.push({
-              name: transaction.description || "Revenu",
+              name: transaction.description || t("budget.revenueLabel"),
               amount: transaction.amount,
               type: 'revenu'
             });
@@ -586,7 +588,7 @@ export default function Budget() {
             const expenseAmount = Math.abs(transaction.amount);
             data[dateKey].expenses += expenseAmount;
             data[dateKey].items.push({
-              name: transaction.description || "Dépense",
+              name: transaction.description || t("budget.expenseLabel"),
               amount: expenseAmount,
               type: 'expense'
             });
@@ -1004,8 +1006,8 @@ export default function Budget() {
     return (
       <MainLayout>
         <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">Budget personnel</h1>
-          <p className="text-muted-foreground">Chargement...</p>
+          <h1 className="text-3xl font-bold mb-2">{t("budget.title")}</h1>
+          <p className="text-muted-foreground">{t("budget.loading")}</p>
         </div>
       </MainLayout>
     );
@@ -1014,25 +1016,25 @@ export default function Budget() {
   return (
     <MainLayout>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Budget personnel</h1>
-        <p className="text-muted-foreground">Gestion complète de vos revenus et dépenses</p>
+        <h1 className="text-3xl font-bold mb-2">{t("budget.title")}</h1>
+        <p className="text-muted-foreground">{t("budget.subtitle")}</p>
       </div>
 
       {/* -----------------------------------------------------
          REVENUS
       ----------------------------------------------------- */}
       <div className="p-4 border rounded-lg mb-6">
-        <h2 className="font-semibold text-lg mb-3">Revenu</h2>
+        <h2 className="font-semibold text-lg mb-3">{t("budget.revenue")}</h2>
 
         <div className="flex gap-4">
           <select
             className="border p-2 rounded"
             value={salaryType}
             onChange={(e) => setSalaryType(e.target.value as any)}
-            aria-label="Type de salaire"
+            aria-label={t("budget.salaryType")}
           >
-            <option value="annual">Salaire annuel</option>
-            <option value="biweekly">Salaire aux 2 semaines</option>
+            <option value="annual">{t("budget.salaryAnnual")}</option>
+            <option value="biweekly">{t("budget.salaryBiweekly")}</option>
           </select>
 
           <input
@@ -1041,7 +1043,7 @@ export default function Budget() {
             className="border p-2 rounded"
             value={salary}
             onChange={(e) => setSalary(parseFloat(e.target.value))}
-            aria-label="Montant du salaire"
+            aria-label={t("budget.salaryAmount")}
           />
 
           {salaryType === "biweekly" && (
@@ -1050,14 +1052,14 @@ export default function Budget() {
               className="border p-2 rounded"
               value={salaryStartDate}
               onChange={(e) => setSalaryStartDate(e.target.value)}
-              aria-label="Date de début du salaire"
+              aria-label={t("budget.salaryStartDate")}
             />
           )}
         </div>
 
         <div className="text-sm mt-3">
-          <p><strong>Revenu annuel :</strong> {annualIncome.toFixed(2)} $</p>
-          <p><strong>Revenu mensuel :</strong> {monthlyIncome.toFixed(2)} $</p>
+          <p><strong>{t("budget.annualRevenue")} :</strong> {annualIncome.toFixed(2)} $</p>
+          <p><strong>{t("budget.monthlyRevenue")} :</strong> {monthlyIncome.toFixed(2)} $</p>
         </div>
       </div>
 
@@ -1066,24 +1068,24 @@ export default function Budget() {
       ----------------------------------------------------- */}
       <div className="p-4 border rounded-lg mb-6">
         <div className="flex justify-between items-center mb-3">
-          <h2 className="font-semibold text-lg">Dépenses fixes</h2>
+          <h2 className="font-semibold text-lg">{t("budget.fixedExpenses")}</h2>
           <button className="bg-primary text-white px-4 py-2 rounded flex items-center gap-2"
             onClick={() => { setEditFixed(null); setShowFixedModal(true); }}>
-            <Plus className="w-4 h-4" /> Ajouter
+            <Plus className="w-4 h-4" /> {t("budget.add")}
           </button>
         </div>
 
         {fixedExpenses.length === 0 ? (
-          <p className="text-muted-foreground">Aucune dépense fixe enregistrée.</p>
+          <p className="text-muted-foreground">{t("budget.noFixedExpenses")}</p>
         ) : (
           <div className="space-y-3">
             {fixedExpenses.map((exp) => (
               <div key={exp.id} className="p-3 border rounded flex justify-between items-center">
                 <div>
                   <p className="font-semibold">{exp.name}</p>
-                  <p className="text-sm">{exp.amount.toFixed(2)} $ / période</p>
+                  <p className="text-sm">{exp.amount.toFixed(2)} $ / {t("budget.period")}</p>
                   <p className="text-xs text-muted-foreground">
-                    Début : {exp.startDate} &middot; Récurrence : {exp.recurrence}
+                    {t("budget.start")}: {exp.startDate} &middot; {t("budget.recurrence")}: {t(`budget.recurrence${exp.recurrence.charAt(0).toUpperCase() + exp.recurrence.slice(1)}`)}
                   </p>
                 </div>
 
@@ -1091,12 +1093,12 @@ export default function Budget() {
                   <button
                     className="p-2 border rounded"
                     onClick={() => { setEditFixed(exp); setShowFixedModal(true); }}>
-                    Modifier
+                    {t("budget.edit")}
                   </button>
                   <button
                     className="p-2 rounded border border-destructive text-destructive"
                     onClick={() => handleDeleteFixed(exp.id)}
-                    aria-label="Supprimer cette dépense fixe"
+                    aria-label={t("budget.deleteFixedExpense")}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -1112,17 +1114,17 @@ export default function Budget() {
       ----------------------------------------------------- */}
       <div className="p-4 border rounded-lg mb-6">
         <div className="flex justify-between items-center mb-3">
-          <h2 className="font-semibold text-lg">Dépenses variables</h2>
+          <h2 className="font-semibold text-lg">{t("budget.variableExpenses")}</h2>
           <button
             onClick={() => { setEditVariable(null); setShowVariableModal(true); }}
             className="bg-primary text-white px-4 py-2 rounded flex items-center gap-2"
           >
-            <Plus className="w-4 h-4" /> Ajouter
+            <Plus className="w-4 h-4" /> {t("budget.add")}
           </button>
         </div>
 
         {variableExpenses.length === 0 ? (
-          <p className="text-muted-foreground">Aucune dépense variable.</p>
+          <p className="text-muted-foreground">{t("budget.noVariableExpenses")}</p>
         ) : (
           <div className="space-y-3">
             {variableExpenses.map((exp) => (
@@ -1130,18 +1132,18 @@ export default function Budget() {
                 <div>
                   <p className="font-semibold">{exp.name}</p>
                   <p className="text-sm">{exp.amount.toFixed(2)} $</p>
-                  <p className="text-xs text-muted-foreground">Date : {exp.date}</p>
+                  <p className="text-xs text-muted-foreground">{t("budget.date")}: {exp.date}</p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button className="p-2 border rounded"
                     onClick={() => { setEditVariable(exp); setShowVariableModal(true); }}>
-                    Modifier
+                    {t("budget.edit")}
                   </button>
                   <button
                     className="p-2 rounded border border-destructive text-destructive"
                     onClick={() => handleDeleteVariable(exp.id)}
-                    aria-label="Supprimer cette dépense variable"
+                    aria-label={t("budget.deleteVariableExpense")}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -1157,12 +1159,12 @@ export default function Budget() {
       ----------------------------------------------------- */}
       <div className="p-4 border rounded-lg mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-lg">Calendrier des revenus et dépenses</h2>
+          <h2 className="font-semibold text-lg">{t("budget.calendar")}</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
               className="p-2 border rounded hover:bg-secondary transition-colors"
-              aria-label="Mois précédent"
+              aria-label={t("budget.previousMonth")}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -1172,7 +1174,7 @@ export default function Budget() {
             <button
               onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
               className="p-2 border rounded hover:bg-secondary transition-colors"
-              aria-label="Mois suivant"
+              aria-label={t("budget.nextMonth")}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -1236,7 +1238,7 @@ export default function Budget() {
                       })}
                       {dayData.items.length > 3 && (
                         <div className="text-muted-foreground text-[10px]">
-                          +{dayData.items.length - 3} autre(s)
+                          +{dayData.items.length - 3} {t("budget.others")}
                         </div>
                       )}
                     </div>
@@ -1255,11 +1257,11 @@ export default function Budget() {
         <div className="flex items-center gap-4 mt-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-green-600 rounded"></div>
-            <span>Revenus</span>
+            <span>{t("budget.revenueLabel")}</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-red-600 rounded"></div>
-            <span>Dépenses</span>
+            <span>{t("budget.expenseLabel")}</span>
           </div>
         </div>
       </div>
@@ -1271,14 +1273,14 @@ export default function Budget() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-card border border-border rounded-lg p-6 w-full max-w-lg">
             <h2 className="text-lg font-semibold mb-4">
-              {editFixed ? "Modifier une dépense fixe" : "Ajouter une dépense fixe"}
+              {editFixed ? t("budget.editFixedExpense") : t("budget.addFixedExpense")}
             </h2>
 
             <form onSubmit={handleSaveFixed} className="space-y-4">
               <input
                 name="name"
                 defaultValue={editFixed?.name}
-                placeholder="Nom"
+                placeholder={t("budget.name")}
                 className="border p-2 rounded w-full"
                 required
               />
@@ -1288,7 +1290,7 @@ export default function Budget() {
                 type="number"
                 step="0.01"
                 defaultValue={editFixed?.amount}
-                placeholder="Montant"
+                placeholder={t("budget.amount")}
                 className="border p-2 rounded w-full"
                 required
               />
@@ -1298,7 +1300,7 @@ export default function Budget() {
                 type="date"
                 defaultValue={editFixed?.startDate}
                 className="border p-2 rounded w-full"
-                aria-label="Date de début"
+                aria-label={t("budget.startDate")}
                 required
               />
 
@@ -1307,28 +1309,28 @@ export default function Budget() {
                 type="date"
                 defaultValue={editFixed?.endDate}
                 className="border p-2 rounded w-full"
-                aria-label="Date de fin"
+                aria-label={t("budget.endDate")}
               />
 
               <select
                 name="recurrence"
                 defaultValue={editFixed?.recurrence || "monthly"}
                 className="border p-2 rounded w-full"
-                aria-label="Fréquence de récurrence"
+                aria-label={t("budget.recurrence")}
               >
-                <option value="none">Aucune</option>
-                <option value="weekly">Hebdomadaire</option>
-                <option value="biweekly">Aux 2 semaines</option>
-                <option value="monthly">Mensuel</option>
-                <option value="bimonthly">Aux 2 mois</option>
-                <option value="quarterly">Trimestriel</option>
-                <option value="yearly">Annuel</option>
+                <option value="none">{t("budget.recurrenceNone")}</option>
+                <option value="weekly">{t("budget.recurrenceWeekly")}</option>
+                <option value="biweekly">{t("budget.recurrenceBiweekly")}</option>
+                <option value="monthly">{t("budget.recurrenceMonthly")}</option>
+                <option value="bimonthly">{t("budget.recurrenceBimonthly")}</option>
+                <option value="quarterly">{t("budget.recurrenceQuarterly")}</option>
+                <option value="yearly">{t("budget.recurrenceYearly")}</option>
               </select>
 
               {/* Catégorie */}
               <div>
                 <label htmlFor="fixed-category" className="block text-sm font-medium text-foreground mb-2">
-                  Catégorie
+                  {t("budget.category")}
                 </label>
                 {!showAddCategory ? (
                   <div className="space-y-2">
@@ -1337,25 +1339,25 @@ export default function Budget() {
                       name="category"
                       defaultValue={editFixed?.category || ""}
                       className="border p-2 rounded w-full"
-                      aria-label="Catégorie"
+                      aria-label={t("budget.category")}
                       onChange={(e) => {
                         if (e.target.value === "custom") {
                           setShowAddCategory(true);
                         }
                       }}
                     >
-                      <option value="">Sélectionner une catégorie</option>
-                      <option value="Habitation">Habitation</option>
-                      <option value="Abonnements">Abonnements</option>
-                      <option value="Loisirs">Loisirs</option>
-                      <option value="Électricité">Électricité</option>
-                      <option value="Remboursement">Remboursement</option>
-                      <option value="Dettes">Dettes</option>
-                      <option value="Autres">Autres</option>
+                      <option value="">{t("budget.selectCategory")}</option>
+                      <option value="Habitation">{t("budget.categoryHousing")}</option>
+                      <option value="Abonnements">{t("budget.categorySubscriptions")}</option>
+                      <option value="Loisirs">{t("budget.categoryLeisure")}</option>
+                      <option value="Électricité">{t("budget.categoryElectricity")}</option>
+                      <option value="Remboursement">{t("budget.categoryReimbursement")}</option>
+                      <option value="Dettes">{t("budget.categoryDebts")}</option>
+                      <option value="Autres">{t("budget.categoryOther")}</option>
                       {customCategories.map((cat) => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
-                      <option value="custom">+ Personnaliser</option>
+                      <option value="custom">{t("budget.customizeCategory")}</option>
                     </select>
                   </div>
                 ) : (
@@ -1365,14 +1367,14 @@ export default function Budget() {
                       value={newCategory}
                       onChange={(e) => setNewCategory(e.target.value)}
                       onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomCategory())}
-                      placeholder="Nouvelle catégorie"
+                      placeholder={t("budget.newCategory")}
                       className="flex-1 px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <button
                       type="button"
                       onClick={addCustomCategory}
                       className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
-                      aria-label="Ajouter la catégorie"
+                      aria-label={t("budget.addCategory")}
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -1383,7 +1385,7 @@ export default function Budget() {
                         setNewCategory("");
                       }}
                       className="px-3 py-2 border border-border rounded-lg hover:opacity-90 transition-opacity"
-                      aria-label="Annuler"
+                      aria-label={t("budget.cancel")}
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1418,10 +1420,10 @@ export default function Budget() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-foreground">
-                    {editVariable ? "Modifier une dépense variable" : "Ajouter une dépense variable"}
+                    {editVariable ? t("budget.editVariableExpense") : t("budget.addVariableExpense")}
                   </h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Cette dépense sera ajoutée comme transaction
+                    {t("budget.expenseWillBeAdded")}
                   </p>
                 </div>
               </div>
@@ -1431,7 +1433,7 @@ export default function Budget() {
                   setShowManualTaxes(false);
                 }}
                 className="p-2 hover:bg-secondary rounded-lg transition-colors text-muted-foreground hover:text-foreground"
-                aria-label="Fermer"
+                aria-label={t("budget.close")}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1444,7 +1446,7 @@ export default function Budget() {
                 <div className="flex items-center gap-2 mb-4">
                   <FileText className="w-4 h-4 text-muted-foreground" />
                   <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">
-                    Informations principales
+                    {t("budget.mainInfo")}
                   </h3>
                 </div>
                 
@@ -1452,7 +1454,7 @@ export default function Budget() {
                   <div>
                     <label htmlFor="variable-date" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-muted-foreground" />
-                      Date <span className="text-destructive">*</span>
+                      {t("budget.date")} <span className="text-destructive">*</span>
                     </label>
                     <input
                       id="variable-date"
@@ -1467,7 +1469,7 @@ export default function Budget() {
                   <div>
                     <label htmlFor="variable-amount" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
                       <DollarSign className="w-4 h-4 text-muted-foreground" />
-                      Montant <span className="text-destructive">*</span>
+                      {t("budget.amount")} <span className="text-destructive">*</span>
                     </label>
                     <input
                       id="variable-amount"
@@ -1485,7 +1487,7 @@ export default function Budget() {
                   <div className="md:col-span-2">
                     <label htmlFor="variable-description" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
                       <FileText className="w-4 h-4 text-muted-foreground" />
-                      Description <span className="text-destructive">*</span>
+                      {t("budget.description")} <span className="text-destructive">*</span>
                     </label>
                     <input
                       id="variable-description"
@@ -1493,7 +1495,7 @@ export default function Budget() {
                       name="description"
                       defaultValue={editVariable?.name}
                       className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
-                      placeholder="Description de la dépense"
+                      placeholder={t("budget.description")}
                       required
                     />
                   </div>
@@ -1503,7 +1505,7 @@ export default function Budget() {
                     <div>
                       <label htmlFor="variable-company" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
                         <Building2 className="w-4 h-4 text-muted-foreground" />
-                        Entreprise <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                        {t("budget.company")} <span className="text-xs text-muted-foreground font-normal">({t("budget.optional")})</span>
                       </label>
                       <select 
                         id="variable-company" 
@@ -1517,7 +1519,7 @@ export default function Budget() {
                             </option>
                           ))
                         ) : (
-                          <option value="">Aucune entreprise</option>
+                          <option value="">{t("budget.noCompany")}</option>
                         )}
                       </select>
                     </div>
@@ -1525,14 +1527,14 @@ export default function Budget() {
                     <div>
                       <label htmlFor="variable-account" className="text-sm font-medium text-foreground block mb-2 flex items-center gap-2">
                         <Wallet className="w-4 h-4 text-muted-foreground" />
-                        Compte <span className="text-xs text-muted-foreground font-normal">(optionnel)</span>
+                        {t("budget.account")} <span className="text-xs text-muted-foreground font-normal">({t("budget.optional")})</span>
                       </label>
                       <select 
                         id="variable-account" 
                         name="account" 
                         className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
                       >
-                        <option value="">Aucun compte</option>
+                        <option value="">{t("budget.noAccount")}</option>
                         {accounts.length > 0 ? (
                           accounts.map((account) => (
                             <option key={account.id} value={account.name}>
@@ -1548,7 +1550,7 @@ export default function Budget() {
                     <div className="flex items-center justify-between mb-2">
                       <label htmlFor="variable-category" className="text-sm font-medium text-foreground flex items-center gap-2">
                         <Tag className="w-4 h-4 text-muted-foreground" />
-                        Catégorie <span className="text-destructive">*</span>
+                        {t("budget.category")} <span className="text-destructive">*</span>
                       </label>
                       {!showAddCategory && (
                         <button
@@ -1568,14 +1570,14 @@ export default function Budget() {
                           value={newCategory}
                           onChange={(e) => setNewCategory(e.target.value)}
                           onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomCategory())}
-                          placeholder="Nouvelle catégorie"
+                          placeholder={t("budget.newCategory")}
                           className="flex-1 px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                         />
                         <button
                           type="button"
                           onClick={addCustomCategory}
                           className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
-                          aria-label="Ajouter la catégorie"
+                          aria-label={t("budget.addCategory")}
                         >
                           <Plus className="w-4 h-4" />
                         </button>
@@ -1586,7 +1588,7 @@ export default function Budget() {
                             setNewCategory("");
                           }}
                           className="px-3 py-2 border border-border rounded-lg text-foreground hover:bg-secondary transition-colors"
-                          aria-label="Annuler l'ajout de catégorie"
+                          aria-label={t("budget.cancelAddCategory")}
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -1646,7 +1648,7 @@ export default function Budget() {
                       name="businessPurpose"
                       rows={2}
                       className="w-full px-4 py-2.5 border-2 border-border/80 rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/60"
-                      placeholder="Décrivez l'objectif commercial de cette transaction"
+                      placeholder={t("budget.businessPurpose")}
                     />
                   </div>
                   
