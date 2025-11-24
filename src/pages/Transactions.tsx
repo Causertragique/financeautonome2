@@ -13,7 +13,7 @@ import { uploadTransactionDocument, deleteTransactionDocument, type Document } f
 import React from "react";
 
 export default function Transactions() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { currentUser } = useAuth();
   const { selectedYear } = useFiscalYearContext();
   const { usageType, currentMode } = useUsageMode();
@@ -253,7 +253,7 @@ export default function Transactions() {
     
     if (isPersonalMode) {
       // En mode personnel, déterminer si c'est une entrée ou sortie
-      if (rawType === "revenue") {
+      if (rawType === "revenu") {
         type = "income";
       } else if (rawType === "depense" || rawType === "remboursement" || rawType === "paiement_facture") {
         type = "expense";
@@ -575,10 +575,13 @@ export default function Transactions() {
       headers.join(","),
       ...filteredTransactions.map((transaction) => {
         const tags = transaction.tags ? transaction.tags.join("; ") : "";
-        const typeLabel = transaction.type === "income" 
-          ? t("transactions.income") 
+        // Déterminer si c'est un revenu - "income" et "revenu" sont toujours des revenus
+        const isIncome = transaction.type === "income" || transaction.type === "revenu";
+        // Afficher "revenu" en français, "income" en anglais
+        const typeLabel = isIncome 
+          ? (language === "fr" ? "revenu" : "income")
           : t("transactions.expense");
-        const amount = transaction.type === "income" 
+        const amount = isIncome 
           ? `+${transaction.amount.toFixed(2)} $` 
           : `-${transaction.amount.toFixed(2)} $`;
         
@@ -713,13 +716,15 @@ export default function Transactions() {
             </thead>
             <tbody>
               ${filteredTransactions.map((transaction) => {
-                const typeLabel = transaction.type === "income" 
-                  ? t("transactions.income") 
+                const isIncome = transaction.type === "income" || transaction.type === "revenu";
+                // Afficher "revenu" en français, "income" en anglais
+                const typeLabel = isIncome 
+                  ? (language === "fr" ? "revenu" : "income")
                   : t("transactions.expense");
-                const amount = transaction.type === "income" 
+                const amount = isIncome 
                   ? `+${transaction.amount.toFixed(2)} $` 
                   : `-${transaction.amount.toFixed(2)} $`;
-                const amountClass = transaction.type === "income" ? "income" : "expense";
+                const amountClass = isIncome ? "income" : "expense";
                 
                 return `
                   <tr>
@@ -783,8 +788,12 @@ export default function Transactions() {
         : t.company === filterCompany);
     const matchesCategory = !filterCategory || t.category === filterCategory;
     const matchesAmount = filterAmount === "all" || 
-      (filterAmount === "income" && t.type === "income") ||
-      (filterAmount === "expense" && t.type === "expense");
+      (filterAmount === "income" && (t.type === "income" || t.type === "revenu")) ||
+      (filterAmount === "expense" && (
+        (currentMode === "personal" || usageType === "personal")
+          ? (t.type === "depense" || t.type === "remboursement" || t.type === "paiement_facture" || (t.type === "transfert" && t.transferType === "between_persons"))
+          : t.type === "expense"
+      ));
     return matchesSearch && matchesType && matchesDate && matchesCompany && matchesCategory && matchesAmount;
   });
 
@@ -838,12 +847,24 @@ export default function Transactions() {
     return sortDirection === "asc" ? comparison : -comparison;
   });
 
+  // Calculer les totaux selon le mode
+  // "income" et "revenu" sont toujours des revenus
   const totalIncome = transactions
-    .filter((t) => t.type === "income")
+    .filter((t) => t.type === "income" || t.type === "revenu")
     .reduce((sum, t) => sum + t.amount, 0);
 
   const totalExpenses = transactions
-    .filter((t) => t.type === "expense")
+    .filter((t) => {
+      if (currentMode === "personal" || usageType === "personal") {
+        // En mode personnel: "depense", "remboursement", "paiement_facture" sont des dépenses
+        return t.type === "depense" || 
+               t.type === "remboursement" || 
+               t.type === "paiement_facture" ||
+               (t.type === "transfert" && t.transferType === "between_persons");
+      } else {
+        return t.type === "expense"; // En mode business, "expense" est une dépense
+      }
+    })
     .reduce((sum, t) => sum + t.amount, 0);
 
   return (
@@ -1197,11 +1218,15 @@ export default function Transactions() {
                 </tr>
                       ) : sortedTransactions.length > 0 ? (
                         sortedTransactions.map((transaction) => {
-                          // Déterminer le label du type selon le mode
+                          // Déterminer le label du type selon le mode et la langue
                           const getTypeLabel = () => {
+                            // Pour les revenus: "revenu" en français, "income" en anglais
+                            if (transaction.type === "income" || transaction.type === "revenu") {
+                              return language === "fr" ? "revenu" : "income";
+                            }
+                            
                             if (currentMode === "personal" || usageType === "personal") {
                               switch (transaction.type) {
-                                case "revenue": return t("transactions.typeRevenue");
                                 case "depense": return t("transactions.typeDepense");
                                 case "transfert": return t("transactions.typeTransfert");
                                 case "remboursement": return t("transactions.typeRemboursement");
@@ -1209,14 +1234,15 @@ export default function Transactions() {
                                 default: return transaction.type;
                               }
                             } else {
-                              return transaction.type === "income" ? t("transactions.income") : t("transactions.expense");
+                              return transaction.type === "expense" ? t("transactions.expense") : transaction.type;
                             }
                           };
                           
                           // Déterminer si c'est une entrée ou sortie d'argent
-                          const isIncome = (currentMode === "personal" || usageType === "personal") 
-                            ? transaction.type === "revenue"
-                            : transaction.type === "income";
+                          // "income" est toujours un revenu
+                          // En mode personnel: "revenu" et "income" sont des revenus
+                          // En mode business: "income" est un revenu
+                          const isIncome = transaction.type === "income" || transaction.type === "revenu";
                           
                           return (
                 <tr
@@ -1394,7 +1420,7 @@ export default function Transactions() {
                         </>
                       ) : (
                         <>
-                          <option value="revenue">{t("transactions.typeRevenue")}</option>
+                          <option value="revenu">{t("transactions.typerevenu")}</option>
                           <option value="depense">{t("transactions.typeDepense")}</option>
                           <option value="transfert">{t("transactions.typeTransfert")}</option>
                           <option value="remboursement">{t("transactions.typeRemboursement")}</option>

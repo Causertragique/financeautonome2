@@ -247,7 +247,7 @@ export default function TaxFiling() {
     status: "draft",
   };
 
-  const totalRevenue = transactions
+  const totalrevenu = transactions
     .filter((t) => t.type === "income")
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -260,7 +260,7 @@ export default function TaxFiling() {
   useEffect(() => {
     const checkRegistration = async () => {
       try {
-        const required = await shouldRegisterForTaxes(totalRevenue);
+        const required = await shouldRegisterForTaxes(totalrevenu);
         setRegistrationRequired(required);
       } catch (error) {
         console.error(
@@ -270,7 +270,7 @@ export default function TaxFiling() {
       }
     };
     checkRegistration();
-  }, [totalRevenue]);
+  }, [totalrevenu]);
 
   // Totaux véhicule (pour info)
   const totalVehicleDeductible = vehicleProfiles.reduce(

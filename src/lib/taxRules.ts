@@ -160,13 +160,13 @@ export async function classifyTransaction(
   // Analyser la description
   const descriptionLower = description.toLowerCase();
   
-  // Règle IS_REVENUE
-  const revenueKeywords = ['vente', 'client', 'facture', 'paiement', 'honoraire', 'commission'];
-  const isRevenue = revenueKeywords.some(keyword => descriptionLower.includes(keyword)) && amount > 0;
+  // Règle IS_revenu
+  const revenuKeywords = ['vente', 'client', 'facture', 'paiement', 'honoraire', 'commission'];
+  const isrevenu = revenuKeywords.some(keyword => descriptionLower.includes(keyword)) && amount > 0;
   
-  if (isRevenue) {
+  if (isrevenu) {
     return {
-      type: 'revenue',
+      type: 'revenu',
       confidence: 0.8,
       suggestedCategory: 'Revenus'
     };
@@ -243,7 +243,7 @@ export async function calculateTaxes(
  * Vérifie si l'entreprise doit s'enregistrer pour GST/QST
  */
 export async function shouldRegisterForTaxes(
-  taxableRevenueLast12Months: number
+  taxablerevenuLast12Months: number
 ): Promise<{
   gstRequired: boolean;
   qstRequired: boolean;
@@ -252,8 +252,8 @@ export async function shouldRegisterForTaxes(
   const threshold = rules.tax.federal.sales_tax_GST.small_supplier_threshold_last_12_months;
 
   return {
-    gstRequired: taxableRevenueLast12Months > threshold,
-    qstRequired: taxableRevenueLast12Months > threshold
+    gstRequired: taxablerevenuLast12Months > threshold,
+    qstRequired: taxablerevenuLast12Months > threshold
   };
 }
 

@@ -22,7 +22,7 @@ const mockCompanies = [
     owner: "John Doe",
     email: "john@techsolutions.com",
     stripe: true,
-    revenue: "$125,000",
+    revenu: "$125,000",
     status: "active",
   },
   {
@@ -35,7 +35,7 @@ const mockCompanies = [
     owner: "Jane Smith",
     email: "jane@creativeagency.com",
     stripe: false,
-    revenue: "$85,000",
+    revenu: "$85,000",
     status: "active",
   },
 ];
@@ -51,7 +51,7 @@ interface Company {
   owner?: string;
   email?: string;
   stripe?: boolean;
-  revenue?: string;
+  revenu?: string;
   status?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -143,7 +143,7 @@ export default function Companies() {
       (t) => t.company === companyName
     );
     
-    const revenue = companyTransactions
+    const revenu = companyTransactions
       .filter((t) => t.type === "income")
       .reduce((sum, t) => sum + t.amount, 0);
     
@@ -151,9 +151,9 @@ export default function Companies() {
       .filter((t) => t.type === "expense")
       .reduce((sum, t) => sum + t.amount, 0);
     
-    const net = revenue - expenses;
+    const net = revenu - expenses;
     
-    return { revenue, expenses, net };
+    return { revenu, expenses, net };
   };
 
   // Gérer la soumission du formulaire
@@ -176,7 +176,7 @@ export default function Companies() {
         owner: formData.owner || "",
         email: formData.email || "",
         stripe: false,
-        revenue: "$0",
+        revenu: "$0",
         status: "active",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -371,9 +371,9 @@ export default function Companies() {
                     return (
                       <>
                         <div>
-                          <span className="text-muted-foreground">{t("companies.ytdRevenue")}: </span>
+                          <span className="text-muted-foreground">{t("companies.ytdrevenu")}: </span>
                           <span className="font-medium text-success">
-                            {stats.revenue.toLocaleString("en-US", { minimumFractionDigits: 2 })} $
+                            {stats.revenu.toLocaleString("en-US", { minimumFractionDigits: 2 })} $
                           </span>
                         </div>
                         <div>
@@ -394,7 +394,7 @@ export default function Companies() {
                 </div>
               ) : (
                 <span className="text-sm font-medium text-success">
-                  {t("companies.ytdRevenue")}: {company.revenue}
+                  {t("companies.ytdrevenu")}: {company.revenu}
                 </span>
               )}
               <div className="flex items-center gap-2">

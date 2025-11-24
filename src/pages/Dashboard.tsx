@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useFiscalYearContext } from "../contexts/FiscalYearContext";
 import { useUsageMode } from "../contexts/UsageModeContext";
+import { format, addWeeks, addMonths, isBefore, startOfMonth, endOfMonth, isSameMonth, startOfYear, endOfYear } from "date-fns";
 import { 
   getTransactions, 
   type Transaction,
@@ -53,8 +54,8 @@ export default function Dashboard() {
     salaryType: "annual" | "biweekly";
     salary: number;
     salaryStartDate: string;
-    fixedExpenses: Array<{ id: string; name: string; amount: number; startDate: string; endDate?: string; recurrence: string }>;
-    variableExpenses: Array<{ id: string; name: string; amount: number; date: string }>;
+    fixedExpenses: Array<{ id: string; name: string; amount: number; startDate: string; endDate?: string; recurrence: string; category?: string }>;
+    variableExpenses: Array<{ id: string; name: string; amount: number; date: string; category?: string }>;
   } | null>(null);
   
   // Cache pour les données des deux modes (pour basculement instantané)
@@ -89,8 +90,8 @@ export default function Dashboard() {
         salaryType: "annual" as "annual" | "biweekly",
         salary: 0,
         salaryStartDate: "",
-        fixedExpenses: [] as any[],
-        variableExpenses: [] as any[],
+        fixedExpenses: [] as Array<{ id: string; name: string; amount: number; startDate: string; endDate?: string; recurrence: string; category?: string }>,
+        variableExpenses: [] as Array<{ id: string; name: string; amount: number; date: string; category?: string }>,
       };
       
       snapshot.forEach((docSnap) => {
@@ -323,15 +324,15 @@ export default function Dashboard() {
   
   const totalIncome = transactions
     .filter((t) => {
-      if (isPersonalMode) {
-        // En mode personnel : revenu = "revenue"
-        // Exclure les transferts entre comptes (transferType === "between_accounts")
-        if (t.type === "revenue") return true;
-        if (t.type === "transfert" && t.transferType === "between_accounts") return false;
-        return false;
-      } else {
-        return t.type === "income";
-      }
+        if (isPersonalMode) {
+          // En mode personnel : revenu = "revenu" ou "income"
+          // Exclure les transferts entre comptes (transferType === "between_accounts")
+          if (t.type === "revenu" || t.type === "income") return true;
+          if (t.type === "transfert" && t.transferType === "between_accounts") return false;
+          return false;
+        } else {
+          return t.type === "income" || t.type === "revenu";
+        }
     })
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -374,21 +375,284 @@ export default function Dashboard() {
   const budgetVariance = budgetedIncome - budgetedExpenses;
   const actualVariance = totalIncome - totalExpenses;
 
-  // Calculer les données mensuelles à partir des transactions réelles et du budget
-  const calculateMonthlyData = () => {
-    if (shouldShowMockData) {
-      return [
-        { month: t("dashboard.monthJan"), revenue: 4000, expenses: 2400, budgetRevenue: 4000, budgetExpenses: 2500 },
-        { month: t("dashboard.monthFeb"), revenue: 3000, expenses: 1398, budgetRevenue: 4000, budgetExpenses: 2500 },
-        { month: t("dashboard.monthMar"), revenue: 2000, expenses: 9800, budgetRevenue: 4000, budgetExpenses: 2500 },
-        { month: t("dashboard.monthApr"), revenue: 2780, expenses: 3908, budgetRevenue: 4000, budgetExpenses: 2500 },
-        { month: t("dashboard.monthMay"), revenue: 1890, expenses: 4800, budgetRevenue: 4000, budgetExpenses: 2500 },
-        { month: t("dashboard.monthJun"), revenue: 2390, expenses: 3800, budgetRevenue: 4000, budgetExpenses: 2500 },
-        { month: t("dashboard.monthJul"), revenue: 3490, expenses: 4300, budgetRevenue: 4000, budgetExpenses: 2500 },
-      ];
+  // Helper function pour générer les événements récurrents pour toute l'année (même logique que Budget.tsx)
+  const generateRecurrenceEventsForYear = (
+    exp: { startDate: string; endDate?: string; recurrence: string; amount: number; name: string },
+    year: number
+  ): Array<{ date: string; name: string; amount: number }> => {
+    const results: any[] = [];
+    const startDateParts = exp.startDate.split('-');
+    const startDate = new Date(
+      parseInt(startDateParts[0]),
+      parseInt(startDateParts[1]) - 1,
+      parseInt(startDateParts[2])
+    );
+    startDate.setHours(0, 0, 0, 0);
+    
+    const end = exp.endDate ? (() => {
+      const endParts = exp.endDate.split('-');
+      const endDate = new Date(
+        parseInt(endParts[0]),
+        parseInt(endParts[1]) - 1,
+        parseInt(endParts[2])
+      );
+      endDate.setHours(23, 59, 59, 999);
+      return endDate;
+    })() : new Date(year, 11, 31, 23, 59, 59, 999);
+    
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999);
+    
+    if (end < yearStart || startDate > yearEnd) {
+      return results;
+    }
+    
+    const dayOfMonth = startDate.getDate();
+    let current = new Date(Math.max(startDate.getTime(), yearStart.getTime()));
+    current.setHours(0, 0, 0, 0);
+    
+    const add = (d: Date) => {
+      if (d >= yearStart && d <= yearEnd && d >= startDate && d <= end) {
+        const dateStr = format(d, "yyyy-MM-dd");
+        results.push({ date: dateStr, name: exp.name, amount: exp.amount });
+      }
+    };
+    
+    add(current);
+    
+    while (isBefore(current, end) && current <= yearEnd) {
+      switch (exp.recurrence) {
+        case "weekly":
+          current = addWeeks(current, 1);
+          break;
+        case "biweekly":
+          current = addWeeks(current, 2);
+          break;
+        case "monthly": {
+          const currentMonth = current.getMonth();
+          const currentYear = current.getFullYear();
+          let nextMonth = currentMonth + 1;
+          let nextYear = currentYear;
+          if (nextMonth > 11) {
+            nextMonth = 0;
+            nextYear = currentYear + 1;
+          }
+          const lastDayOfNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+          const targetDay = Math.min(dayOfMonth, lastDayOfNextMonth);
+          current = new Date(nextYear, nextMonth, targetDay);
+          current.setHours(0, 0, 0, 0);
+          break;
+        }
+        case "bimonthly": {
+          const currentMonth = current.getMonth();
+          const currentYear = current.getFullYear();
+          let nextBimonth = currentMonth + 2;
+          let nextYear = currentYear;
+          if (nextBimonth > 11) {
+            nextBimonth = nextBimonth - 12;
+            nextYear = currentYear + 1;
+          }
+          const lastDayOfBimonth = new Date(nextYear, nextBimonth + 1, 0).getDate();
+          const targetDay = Math.min(dayOfMonth, lastDayOfBimonth);
+          current = new Date(nextYear, nextBimonth, targetDay);
+          current.setHours(0, 0, 0, 0);
+          break;
+        }
+        case "quarterly": {
+          const currentMonth = current.getMonth();
+          const currentYear = current.getFullYear();
+          let nextQuarter = currentMonth + 3;
+          let nextYear = currentYear;
+          if (nextQuarter > 11) {
+            nextQuarter = nextQuarter - 12;
+            nextYear = currentYear + 1;
+          }
+          const lastDayOfQuarter = new Date(nextYear, nextQuarter + 1, 0).getDate();
+          const targetDay = Math.min(dayOfMonth, lastDayOfQuarter);
+          current = new Date(nextYear, nextQuarter, targetDay);
+          current.setHours(0, 0, 0, 0);
+          break;
+        }
+        case "yearly": {
+          const nextYear = current.getFullYear() + 1;
+          const lastDayOfYear = new Date(nextYear, current.getMonth() + 1, 0).getDate();
+          const targetDay = Math.min(dayOfMonth, lastDayOfYear);
+          current = new Date(nextYear, current.getMonth(), targetDay);
+          current.setHours(0, 0, 0, 0);
+          break;
+        }
+        default:
+          return results;
+      }
+      
+      if (current <= end && current <= yearEnd) {
+        add(current);
+      }
+    }
+    
+    return results;
+  };
+
+  // Calculer les données mensuelles basées sur la logique du calendrier (par jour, puis agrégées par mois)
+  const calculateMonthlyData = useMemo(() => {
+    // S'assurer que selectedYear est défini (utiliser l'année actuelle par défaut)
+    const year = selectedYear || new Date().getFullYear();
+    
+    // Calculer les données par jour pour toute l'année (comme le calendrier)
+    const dailyData: { [key: string]: { revenu: number; expenses: number } } = {};
+    const yearStart = new Date(year, 0, 1);
+    yearStart.setHours(0, 0, 0, 0);
+    const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999);
+    
+    // 1. Ajouter les revenus planifiés (salaire) selon le type
+    if (budgetData && budgetData.salary > 0 && budgetData.salaryStartDate) {
+      const startDateParts = budgetData.salaryStartDate.split('-');
+      const startDate = new Date(
+        parseInt(startDateParts[0]),
+        parseInt(startDateParts[1]) - 1,
+        parseInt(startDateParts[2])
+      );
+      startDate.setHours(0, 0, 0, 0);
+      
+      if (budgetData.salaryType === "biweekly") {
+        // Salaire aux 2 semaines : calculer tous les jours de paie dans l'année
+        let currentPayDate = new Date(startDate);
+        currentPayDate.setHours(0, 0, 0, 0);
+        
+        // Si la date de début est avant le début de l'année, trouver le premier jour de paie dans l'année
+        if (currentPayDate < yearStart) {
+          const daysDiff = Math.floor((yearStart.getTime() - currentPayDate.getTime()) / (1000 * 60 * 60 * 24));
+          const periodsToAdd = Math.ceil(daysDiff / 14);
+          currentPayDate = addWeeks(startDate, periodsToAdd * 2);
+          currentPayDate.setHours(0, 0, 0, 0);
+          
+          if (currentPayDate > yearStart) {
+            const prevDate = addWeeks(currentPayDate, -2);
+            prevDate.setHours(0, 0, 0, 0);
+            if (prevDate >= startDate && prevDate < yearStart) {
+              currentPayDate = prevDate;
+            }
+          }
+        }
+        
+        if (currentPayDate < startDate) {
+          currentPayDate = new Date(startDate);
+          currentPayDate.setHours(0, 0, 0, 0);
+        }
+        
+        while (currentPayDate <= yearEnd && currentPayDate >= startDate) {
+          const dateKey = format(currentPayDate, "yyyy-MM-dd");
+          if (!dailyData[dateKey]) {
+            dailyData[dateKey] = { revenu: 0, expenses: 0 };
+          }
+          dailyData[dateKey].revenu += budgetData.salary;
+          const nextDate = addWeeks(currentPayDate, 2);
+          nextDate.setHours(0, 0, 0, 0);
+          currentPayDate = nextDate;
+        }
+      } else {
+        // Salaire annuel : mettre le 1er de chaque mois
+        for (let month = 0; month < 12; month++) {
+          const firstOfMonth = new Date(year, month, 1);
+          firstOfMonth.setHours(0, 0, 0, 0);
+          if (firstOfMonth >= startDate && firstOfMonth <= yearEnd) {
+            const dateKey = format(firstOfMonth, "yyyy-MM-dd");
+            if (!dailyData[dateKey]) {
+              dailyData[dateKey] = { revenu: 0, expenses: 0 };
+            }
+            dailyData[dateKey].revenu += budgetedMonthlyIncome;
+          }
+        }
+      }
     }
 
-    // Grouper les transactions par mois
+    // 2. Ajouter les dépenses fixes récurrentes
+    if (budgetData && budgetData.fixedExpenses) {
+      budgetData.fixedExpenses.forEach((exp) => {
+        const events = generateRecurrenceEventsForYear(exp, year);
+        events.forEach((event) => {
+          const dateKey = event.date;
+          if (!dailyData[dateKey]) {
+            dailyData[dateKey] = { revenu: 0, expenses: 0 };
+          }
+          dailyData[dateKey].expenses += event.amount;
+        });
+      });
+    }
+
+    // 3. Ajouter les dépenses variables
+    if (budgetData && budgetData.variableExpenses) {
+      budgetData.variableExpenses.forEach((v) => {
+        const expenseDateParts = v.date.split('-');
+        const expenseDate = new Date(
+          parseInt(expenseDateParts[0]),
+          parseInt(expenseDateParts[1]) - 1,
+          parseInt(expenseDateParts[2])
+        );
+        expenseDate.setHours(0, 0, 0, 0);
+        
+        if (expenseDate >= yearStart && expenseDate <= yearEnd) {
+          const dateKey = format(expenseDate, "yyyy-MM-dd");
+          if (!dailyData[dateKey]) {
+            dailyData[dateKey] = { revenu: 0, expenses: 0 };
+          }
+          dailyData[dateKey].expenses += v.amount;
+        }
+      });
+    }
+
+    // 4. Ajouter les transactions réelles (elles remplacent les valeurs planifiées pour les jours concernés)
+    transactions.forEach((transaction) => {
+      try {
+        const transactionDateParts = transaction.date.split('-');
+        const transactionDate = new Date(
+          parseInt(transactionDateParts[0]),
+          parseInt(transactionDateParts[1]) - 1,
+          parseInt(transactionDateParts[2])
+        );
+        transactionDate.setHours(0, 0, 0, 0);
+        
+        if (transactionDate >= yearStart && transactionDate <= yearEnd) {
+          const dateKey = format(transactionDate, "yyyy-MM-dd");
+          if (!dailyData[dateKey]) {
+            dailyData[dateKey] = { revenu: 0, expenses: 0 };
+          }
+
+          // Exclure les transferts entre comptes en mode personnel
+          const isTransferBetweenAccounts = 
+            isPersonalMode && 
+            transaction.type === "transfert" && 
+            transaction.transferType === "between_accounts";
+
+          if (isTransferBetweenAccounts) {
+            return;
+          }
+
+          const isrevenu = transaction.type === "income" || transaction.type === "revenu";
+          const isExpense = !isrevenu && (
+            (isPersonalMode && (
+              transaction.type === "depense" || 
+              transaction.type === "remboursement" || 
+              transaction.type === "paiement_facture" ||
+              (transaction.type === "transfert" && transaction.transferType === "between_persons")
+            )) ||
+            (!isPersonalMode && transaction.type === "expense")
+          );
+
+          if (isrevenu) {
+            // Ajouter au lieu de remplacer pour cumuler avec le salaire planifié
+            dailyData[dateKey].revenu += transaction.amount;
+          } else if (isExpense) {
+            // Ajouter au lieu de remplacer pour cumuler avec les dépenses planifiées
+            dailyData[dateKey].expenses += Math.abs(transaction.amount);
+          }
+        }
+      } catch (error) {
+        console.error("Erreur lors du traitement de la transaction:", transaction, error);
+      }
+    });
+
+    // Agréger par mois
     const monthlyData: { [key: string]: { revenue: number; expenses: number; budgetRevenue: number; budgetExpenses: number } } = {};
     const monthNames = [
       t("dashboard.monthJan"), t("dashboard.monthFeb"), t("dashboard.monthMar"),
@@ -402,148 +666,62 @@ export default function Dashboard() {
       monthlyData[month] = { revenue: 0, expenses: 0, budgetRevenue: 0, budgetExpenses: 0 };
     });
 
-    // Calculer les revenus réels par mois
-    transactions.forEach((transaction) => {
+    // Agréger les données quotidiennes par mois
+    Object.keys(dailyData).forEach((dateKey) => {
       try {
-        const date = new Date(transaction.date);
+        const date = new Date(dateKey + "T00:00:00");
         if (isNaN(date.getTime())) {
-          console.warn("Date invalide:", transaction.date);
+          console.warn("Date invalide lors de l'agrégation:", dateKey);
           return;
         }
         const monthIndex = date.getMonth();
         const monthKey = monthNames[monthIndex];
         
-        if (!monthKey) {
-          console.warn("Mois invalide pour l'index:", monthIndex);
-          return;
-        }
-
-        // Gérer les types selon le mode
-        if (isPersonalMode) {
-          // Mode personnel
-          if (transaction.type === "revenue") {
-            monthlyData[monthKey].revenue += transaction.amount;
-          } else if (transaction.type === "depense" || transaction.type === "remboursement" || 
-                     transaction.type === "paiement_facture" || 
-                     (transaction.type === "transfert" && transaction.transferType === "between_persons")) {
-            // Exclure les transferts entre comptes
-            if (!(transaction.type === "transfert" && transaction.transferType === "between_accounts")) {
-              monthlyData[monthKey].expenses += transaction.amount;
-        }
-          }
+        if (monthKey) {
+          monthlyData[monthKey].revenue += dailyData[dateKey].revenu;
+          monthlyData[monthKey].expenses += dailyData[dateKey].expenses;
+          monthlyData[monthKey].budgetRevenue += dailyData[dateKey].revenu; // Pour l'affichage, on utilise les mêmes valeurs
+          monthlyData[monthKey].budgetExpenses += dailyData[dateKey].expenses;
         } else {
-          // Mode business
-        if (transaction.type === "income") {
-          monthlyData[monthKey].revenue += transaction.amount;
-        } else {
-          monthlyData[monthKey].expenses += transaction.amount;
-          }
+          console.warn("Mois invalide pour l'index:", monthIndex, "dateKey:", dateKey);
         }
       } catch (error) {
-        console.error("Erreur lors du traitement de la transaction:", transaction, error);
+        console.error("Erreur lors de l'agrégation pour dateKey:", dateKey, error);
       }
     });
-
-    // Calculer les données du budget par mois
-    if (budgetData) {
-      // Revenus planifiés par mois (salaire mensuel)
-      const monthlyBudgetRevenue = budgetedMonthlyIncome;
-      monthNames.forEach((month) => {
-        monthlyData[month].budgetRevenue = monthlyBudgetRevenue;
-      });
-
-      // Dépenses planifiées par mois
-      // 1. Dépenses fixes récurrentes
-      if (budgetData.fixedExpenses) {
-        budgetData.fixedExpenses.forEach((exp) => {
-          const startDate = new Date(exp.startDate);
-          const endDate = exp.endDate ? new Date(exp.endDate) : new Date(selectedYear, 11, 31);
-          const yearStart = new Date(selectedYear, 0, 1);
-          const yearEnd = new Date(selectedYear, 11, 31);
-          
-          // Vérifier si la dépense est dans l'année sélectionnée
-          if (endDate >= yearStart && startDate <= yearEnd) {
-            // Calculer les occurrences par mois selon la récurrence
-            const recurrenceMap: { [key: string]: number } = {
-              weekly: 4.33, // ~4.33 semaines par mois
-              biweekly: 2.17, // ~2.17 périodes de 2 semaines par mois
-              monthly: 1,
-              bimonthly: 0.5,
-              quarterly: 0.33,
-              yearly: 0.083,
-              none: 0,
-            };
-            
-            const monthlyOccurrences = recurrenceMap[exp.recurrence] || 0;
-            const monthlyAmount = exp.amount * monthlyOccurrences;
-            
-            // Ajouter cette dépense à chaque mois de l'année
-            monthNames.forEach((month, index) => {
-              const monthDate = new Date(selectedYear, index, 1);
-              const monthEnd = new Date(selectedYear, index + 1, 0);
-              
-              // Vérifier si la dépense est active ce mois
-              if (monthDate >= startDate && monthDate <= endDate) {
-                monthlyData[month].budgetExpenses += monthlyAmount;
-              }
-            });
-          }
-        });
-      }
-
-      // 2. Dépenses variables (ajoutées au mois spécifique)
-      if (budgetData.variableExpenses) {
-        budgetData.variableExpenses.forEach((exp) => {
-          try {
-            const expDate = new Date(exp.date);
-            if (isNaN(expDate.getTime())) {
-              console.warn("Date invalide pour dépense variable:", exp.date);
-              return;
-            }
-            
-            const yearStart = new Date(selectedYear, 0, 1);
-            const yearEnd = new Date(selectedYear, 11, 31);
-            
-            // Vérifier si la dépense est dans l'année sélectionnée
-            if (expDate >= yearStart && expDate <= yearEnd) {
-              const monthIndex = expDate.getMonth();
-              const monthKey = monthNames[monthIndex];
-              
-              if (monthKey) {
-                monthlyData[monthKey].budgetExpenses += exp.amount;
-              }
-            }
-          } catch (error) {
-            console.error("Erreur lors du traitement de la dépense variable:", exp, error);
-          }
-        });
-      }
-    }
+    
+    // Debug: vérifier les données de novembre
+    const novemberKey = monthNames[10];
+    console.log("📊 Données novembre:", {
+      monthKey: novemberKey,
+      revenue: monthlyData[novemberKey]?.revenue || 0,
+      expenses: monthlyData[novemberKey]?.expenses || 0,
+      dailyDataKeys: Object.keys(dailyData).filter(key => key.startsWith(`${year}-11-`))
+    });
 
     // Convertir en tableau et trier par mois
-    return monthNames.map((month) => ({
+    const result = monthNames.map((month, index) => ({
       month,
+      monthIndex: index,
       revenue: monthlyData[month]?.revenue || 0,
       expenses: monthlyData[month]?.expenses || 0,
       budgetRevenue: monthlyData[month]?.budgetRevenue || 0,
       budgetExpenses: monthlyData[month]?.budgetExpenses || 0,
-    }));
-  };
+    })).sort((a, b) => a.monthIndex - b.monthIndex);
+    
+    // Debug: vérifier que tous les mois sont présents
+    console.log("📊 Données mensuelles calculées:", result.map(r => ({ month: r.month, revenue: r.revenue, expenses: r.expenses })));
+    
+    return result;
+  }, [selectedYear || new Date().getFullYear(), budgetData, budgetedMonthlyIncome, transactions, isPersonalMode, t]);
 
-  const revenueData = calculateMonthlyData();
+  const revenueData = calculateMonthlyData;
 
   // Calculer les données de catégories à partir des transactions réelles
   const calculateCategoryData = () => {
-    if (shouldShowMockData) {
-      return [
-        { name: t("dashboard.categorySalaries"), value: 35, fill: "#2E5DB8" },
-        { name: t("dashboard.categoryOfficeSupplies"), value: 25, fill: "#0EA752" },
-        { name: t("dashboard.categoryTravel"), value: 20, fill: "#F59E0B" },
-        { name: t("dashboard.categoryEquipment"), value: 15, fill: "#EF4444" },
-        { name: t("dashboard.categoryOther"), value: 5, fill: "#60A5FA" },
-      ];
-    }
-
+    // S'assurer que selectedYear est défini
+    const year = selectedYear || new Date().getFullYear();
+    
     // Grouper les dépenses par catégorie
     const categoryTotals: { [key: string]: number } = {};
     // Couleurs par défaut pour les catégories (utiliser les noms réels des catégories)
@@ -561,29 +739,129 @@ export default function Dashboard() {
       "Other": "#60A5FA",
     };
 
-    transactions
-      .filter((t) => t.type === "expense")
-      .forEach((transaction) => {
-        // Utiliser la catégorie telle quelle (pas de traduction pour éviter les clés)
-        const category = transaction.category || "Autre";
-        categoryTotals[category] = (categoryTotals[category] || 0) + transaction.amount;
+    console.log("📊 Calcul catégories - Transactions totales:", transactions.length);
+    console.log("📊 Mode:", isPersonalMode ? "personnel" : "business");
+    console.log("📊 Année:", year);
+
+    // Filtrer les transactions de dépenses selon le mode et l'année
+    const expenseTransactions = transactions.filter((t) => {
+      // Filtrer par année
+      try {
+        const transactionDate = new Date(t.date);
+        if (transactionDate.getFullYear() !== year) {
+          return false;
+        }
+      } catch (error) {
+        console.warn("Date invalide pour transaction:", t.date);
+        return false;
+      }
+      
+      // Filtrer par type de dépense selon le mode
+      if (isPersonalMode) {
+        // En mode personnel : dépenses = "depense", "remboursement", "paiement_facture", "transfert" (between_persons)
+        // Exclure les transferts entre comptes
+        if (t.type === "transfert" && t.transferType === "between_accounts") {
+          return false;
+        }
+        return t.type === "depense" || 
+               t.type === "remboursement" || 
+               t.type === "paiement_facture" ||
+               (t.type === "transfert" && t.transferType === "between_persons");
+      } else {
+        // En mode business : dépenses = "expense"
+        return t.type === "expense";
+      }
+    });
+
+    console.log("📊 Transactions de dépenses filtrées:", expenseTransactions.length);
+    console.log("📊 Types de transactions:", expenseTransactions.map(t => ({ type: t.type, category: t.category, amount: t.amount })));
+
+    expenseTransactions.forEach((transaction) => {
+      // Utiliser la catégorie telle quelle (pas de traduction pour éviter les clés)
+      const category = transaction.category || "Autre";
+      categoryTotals[category] = (categoryTotals[category] || 0) + Math.abs(transaction.amount);
+    });
+
+    // Ajouter les dépenses fixes du budget qui ont une catégorie
+    if (budgetData && budgetData.fixedExpenses) {
+      const yearStart = new Date(year, 0, 1);
+      const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999);
+      
+      budgetData.fixedExpenses.forEach((exp) => {
+        // Ne traiter que les dépenses qui ont une catégorie
+        if (!exp.category) {
+          return;
+        }
+        
+        const startDate = new Date(exp.startDate);
+        const endDate = exp.endDate ? new Date(exp.endDate) : yearEnd;
+        
+        // Vérifier si la dépense est active dans l'année
+        if (endDate < yearStart || startDate > yearEnd) {
+          return;
+        }
+        
+        // Calculer le nombre d'occurrences dans l'année selon la récurrence
+        const recurrenceMap: { [key: string]: number } = {
+          weekly: 52,
+          biweekly: 26,
+          monthly: 12,
+          bimonthly: 6,
+          quarterly: 4,
+          yearly: 1,
+          none: 1,
+        };
+        
+        const occurrences = recurrenceMap[exp.recurrence] || 1;
+        const annualAmount = exp.amount * occurrences;
+        
+        // Ajouter au total de la catégorie
+        categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + annualAmount;
       });
+    }
+
+    // Ajouter les dépenses variables du budget qui ont une catégorie
+    if (budgetData && budgetData.variableExpenses) {
+      budgetData.variableExpenses.forEach((v) => {
+        // Ne traiter que les dépenses qui ont une catégorie
+        if (!v.category) {
+          return;
+        }
+        
+        try {
+          const expDate = new Date(v.date);
+          if (expDate.getFullYear() === year) {
+            categoryTotals[v.category] = (categoryTotals[v.category] || 0) + Math.abs(v.amount);
+          }
+        } catch (error) {
+          console.warn("Date invalide pour dépense variable:", v.date);
+        }
+      });
+    }
+
+    console.log("📊 Totaux par catégorie (après ajout budget):", categoryTotals);
 
     // Calculer le total pour les pourcentages
     const totalExpenses = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
 
+    console.log("📊 Total dépenses:", totalExpenses);
+
     if (totalExpenses === 0) {
+      console.warn("⚠️ Aucune dépense trouvée pour l'année", year);
       return [];
     }
 
     // Convertir en tableau avec pourcentages
-    return Object.entries(categoryTotals)
+    const result = Object.entries(categoryTotals)
       .map(([name, amount]) => ({
         name,
         value: Math.round((amount / totalExpenses) * 100),
         fill: categoryColors[name] || "#60A5FA",
       }))
       .sort((a, b) => b.value - a.value);
+
+    console.log("📊 Résultat catégories:", result);
+    return result;
   };
 
   const categoryData = calculateCategoryData();
@@ -793,7 +1071,7 @@ export default function Dashboard() {
               <Line
                 type="monotone"
                 dataKey="revenue"
-                name={t("dashboard.revenueLabel")}
+                name="Revenu"
                 stroke="hsl(var(--success))"
                 strokeWidth={3}
                 dot={{ fill: "hsl(var(--success))", r: 4 }}
@@ -802,36 +1080,12 @@ export default function Dashboard() {
               <Line
                 type="monotone"
                 dataKey="expenses"
-                name={t("dashboard.expensesLabel")}
+                name="Dépense"
                 stroke="hsl(var(--destructive))"
                 strokeWidth={3}
                 dot={{ fill: "hsl(var(--destructive))", r: 4 }}
                 activeDot={{ r: 6 }}
               />
-              {budgetData && (budgetedIncome > 0 || budgetedExpenses > 0) && (
-                <>
-                  <Line
-                    type="monotone"
-                    dataKey="budgetRevenue"
-                    name={t("dashboard.revenueLabel") + " (prévision)"}
-                    stroke="hsl(var(--success))"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    opacity={0.6}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="budgetExpenses"
-                    name={t("dashboard.expensesLabel") + " (prévision)"}
-                    stroke="hsl(var(--destructive))"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    opacity={0.6}
-                  />
-                </>
-              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -923,34 +1177,20 @@ export default function Dashboard() {
             <Legend />
             <Bar
               dataKey="revenue"
-              name={t("dashboard.revenueLabel")}
+              name="Revenu"
               fill="hsl(var(--success))"
               radius={[8, 8, 0, 0]}
               opacity={0.9}
             />
             <Bar
               dataKey="expenses"
-              name={t("dashboard.expensesLabel")}
+              name="Dépense"
               fill="hsl(var(--destructive))"
               radius={[8, 8, 0, 0]}
               opacity={0.9}
             />
             {budgetData && (budgetedIncome > 0 || budgetedExpenses > 0) && (
               <>
-                <Bar
-                  dataKey="budgetRevenue"
-                  name={t("dashboard.revenueLabel") + " (prévision)"}
-                  fill="hsl(var(--success))"
-                  radius={[8, 8, 0, 0]}
-                  opacity={0.3}
-                />
-                <Bar
-                  dataKey="budgetExpenses"
-                  name={t("dashboard.expensesLabel") + " (prévision)"}
-                  fill="hsl(var(--destructive))"
-                  radius={[8, 8, 0, 0]}
-                  opacity={0.3}
-                />
               </>
             )}
           </BarChart>
@@ -1114,3 +1354,11 @@ export default function Dashboard() {
     </MainLayout>
   );
 }
+function calculateMonthlyData() {
+  throw new Error("Function not implemented.");
+}
+
+function t(arg0: string) {
+  throw new Error("Function not implemented.");
+}
+

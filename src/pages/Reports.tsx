@@ -416,7 +416,7 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
       }
     };
 
-    const revenueForecast = () => {
+    const revenuForecast = () => {
       if (format === "CSV") {
         return `Mois,Revenus projetés,Revenus réels,Écart
 Janvier,8000.00,7500.00,-500.00
@@ -493,8 +493,8 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
       return taxSummary();
     } else if (templateTitle === t("reports.expenseAnalysis")) {
       return expenseAnalysis();
-    } else if (templateTitle === t("reports.revenueForecast")) {
-      return revenueForecast();
+    } else if (templateTitle === t("reports.revenuForecast")) {
+      return revenuForecast();
     } else {
       return incomeStatement(); // Par défaut
     }
@@ -588,8 +588,8 @@ Ce rapport a été généré automatiquement le ${new Date().toLocaleDateString(
               icon: "📉",
             },
             {
-              title: t("reports.revenueForecast"),
-              description: t("reports.revenueForecastDesc"),
+              title: t("reports.revenuForecast"),
+              description: t("reports.revenuForecastDesc"),
               icon: "📈",
             },
           ].map((template, idx) => (

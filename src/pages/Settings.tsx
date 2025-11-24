@@ -101,10 +101,10 @@ export default function Settings() {
   // Charger les modes de paiement
   useEffect(() => {
     const loadPaymentMethods = async () => {
-      if (!currentUser || !db) {
+    if (!currentUser || !db) {
         setPaymentMethods([]);
-        return;
-      }
+      return;
+    }
 
       try {
         const paymentMethodsRef = collection(db, "users", currentUser.uid, "paymentMethods");
@@ -368,7 +368,7 @@ export default function Settings() {
         if (error.name === "TypeError" && error.message.includes("fetch")) {
           console.warn("Erreur réseau lors du chargement des modes de paiement. Le serveur est peut-être indisponible.");
         } else {
-          console.error("Erreur lors du chargement des modes de paiement:", error);
+        console.error("Erreur lors du chargement des modes de paiement:", error);
         }
         setPaymentMethods([]);
       }

@@ -29,7 +29,7 @@
             "threshold": 50000
           }
         },
-        "general_rule_revenue": {
+        "general_rule_revenu": {
           "description": "Tout revenu provenant d’une activité commerciale, professionnelle ou autre entreprise à but lucratif doit être déclaré.",
           "includes": [
             "ventes de biens",
@@ -55,7 +55,7 @@
           {
             "id": "GST_REG_REQUIRED",
             "condition_description": "Revenus taxables > 30 000 CAD dans une période glissante de 12 mois",
-            "pseudo_condition": "taxable_revenue_last_12m > 30000",
+            "pseudo_condition": "taxable_revenu_last_12m > 30000",
             "action": "require_registration"
           },
           {
@@ -197,7 +197,7 @@
           {
             "id": "QST_REG_REQUIRED",
             "condition_description": "Revenus taxables > 30 000 CAD dans une période glissante de 12 mois",
-            "pseudo_condition": "taxable_revenue_last_12m > 30000",
+            "pseudo_condition": "taxable_revenu_last_12m > 30000",
             "action": "require_registration"
           },
           {
@@ -235,7 +235,7 @@
   "bookkeeping_rules": {
     "transaction_classification": {
       "types": [
-        "revenue",
+        "revenu",
         "expense",
         "asset_purchase",
         "liability",
@@ -247,10 +247,10 @@
       ],
       "classification_logic_examples": [
         {
-          "id": "IS_REVENUE",
+          "id": "IS_revenu",
           "condition_description": "Description contient mots-clés vente ou client, montant positif, compte bancaire ou paiement reçu",
           "pseudo_condition": "text_contains_any(description, ['vente','client','facture','paiement']) AND amount > 0",
-          "suggested_type": "revenue"
+          "suggested_type": "revenu"
         },
         {
           "id": "IS_TRANSFER",
@@ -363,10 +363,10 @@
           "action": "flag_as_new_supplier"
         },
         {
-          "id": "BANK_DEPOSIT_NO_REVENUE",
+          "id": "BANK_DEPOSIT_NO_revenu",
           "description": "Dépôt bancaire sans facture ou revenu associé",
           "pseudo_condition": "transaction.type = 'deposit' AND no_linked_invoice",
-          "action": "flag_as_potential_unrecorded_revenue"
+          "action": "flag_as_potential_unrecorded_revenu"
         }
       ]
     }

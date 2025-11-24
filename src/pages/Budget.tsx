@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import MainLayout from "../layouts/MainLayout";
-import { Plus, Trash2, Calendar, DollarSign, ChevronDown, X, FileText, Building2, Tag, Paperclip, Wallet } from "lucide-react";
-import { format, addWeeks, addMonths, isBefore } from "date-fns";
+import { Plus, Trash2, Calendar, DollarSign, ChevronDown, X, FileText, Building2, Tag, Paperclip, Wallet, ChevronLeft, ChevronRight } from "lucide-react";
+import { format, addWeeks, addMonths, isBefore, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, addDays, subMonths } from "date-fns";
 import { db } from "../lib/firebase";
 import { collection, getDocs, doc, setDoc, deleteDoc, getDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { useUsageMode } from "../contexts/UsageModeContext";
-import { addTransaction, type Transaction } from "../lib/db";
+import { addTransaction, getTransactions, type Transaction } from "../lib/db";
 import { classifyTransaction, calculateTaxes, validateExpense } from "../lib/taxRules";
 
 /* -----------------------------------------------------
@@ -28,6 +28,7 @@ interface FixedExpense {
   startDate: string;
   endDate?: string;
   recurrence: RecurrenceType;
+  category?: string;
 }
 
 interface VariableExpense {
@@ -42,11 +43,35 @@ interface VariableExpense {
 ----------------------------------------------------- */
 function generateRecurrenceEvents(exp: FixedExpense): Array<{ date: string; name: string; amount: number }> {
   const results: any[] = [];
-  let current = new Date(exp.startDate);
-  const end = exp.endDate ? new Date(exp.endDate) : addMonths(new Date(), 6);
+  // Créer la date de début en utilisant les composants pour éviter les problèmes de fuseau horaire
+  const startDateParts = exp.startDate.split('-');
+  const startDate = new Date(
+    parseInt(startDateParts[0]),
+    parseInt(startDateParts[1]) - 1,
+    parseInt(startDateParts[2])
+  );
+  startDate.setHours(0, 0, 0, 0);
+  
+  const end = exp.endDate ? (() => {
+    const endParts = exp.endDate.split('-');
+    const endDate = new Date(
+      parseInt(endParts[0]),
+      parseInt(endParts[1]) - 1,
+      parseInt(endParts[2])
+    );
+    endDate.setHours(23, 59, 59, 999);
+    return endDate;
+  })() : addMonths(new Date(), 6);
+  
+  // Extraire le jour du mois de la date de début
+  const dayOfMonth = startDate.getDate();
 
-  const add = (d: Date) => results.push({ date: format(d, "yyyy-MM-dd"), name: exp.name, amount: exp.amount });
+  const add = (d: Date) => {
+    const dateStr = format(d, "yyyy-MM-dd");
+    results.push({ date: dateStr, name: exp.name, amount: exp.amount });
+  };
 
+  let current = new Date(startDate);
   add(current);
 
   while (isBefore(current, end)) {
@@ -58,20 +83,69 @@ function generateRecurrenceEvents(exp: FixedExpense): Array<{ date: string; name
         current = addWeeks(current, 2);
         break;
       case "monthly":
-        current = addMonths(current, 1);
+        // Pour mensuel, créer une nouvelle date avec le même jour du mois
+        const currentMonth = current.getMonth();
+        const currentYear = current.getFullYear();
+        // Calculer le mois et l'année suivants
+        let nextMonth = currentMonth + 1;
+        let nextYearForMonthly = currentYear;
+        if (nextMonth > 11) {
+          nextMonth = 0;
+          nextYearForMonthly = currentYear + 1;
+        }
+        // Calculer le dernier jour valide du mois suivant
+        const lastDayOfNextMonth = new Date(nextYearForMonthly, nextMonth + 1, 0).getDate();
+        const targetDay = Math.min(dayOfMonth, lastDayOfNextMonth);
+        current = new Date(nextYearForMonthly, nextMonth, targetDay);
+        current.setHours(0, 0, 0, 0);
         break;
       case "bimonthly":
-        current = addMonths(current, 2);
+        // Pour bimestriel, créer une nouvelle date avec le même jour du mois
+        const currentMonthBimonthly = current.getMonth();
+        const currentYearBimonthly = current.getFullYear();
+        let nextBimonth = currentMonthBimonthly + 2;
+        let nextBimonthYear = currentYearBimonthly;
+        if (nextBimonth > 11) {
+          nextBimonth = nextBimonth - 12;
+          nextBimonthYear = currentYearBimonthly + 1;
+        }
+        const lastDayOfBimonth = new Date(nextBimonthYear, nextBimonth + 1, 0).getDate();
+        const targetDayBimonthly = Math.min(dayOfMonth, lastDayOfBimonth);
+        current = new Date(nextBimonthYear, nextBimonth, targetDayBimonthly);
+        current.setHours(0, 0, 0, 0);
         break;
       case "quarterly":
-        current = addMonths(current, 3);
+        // Pour trimestriel, créer une nouvelle date avec le même jour du mois
+        const currentMonthQuarterly = current.getMonth();
+        const currentYearQuarterly = current.getFullYear();
+        let nextQuarter = currentMonthQuarterly + 3;
+        let nextQuarterYear = currentYearQuarterly;
+        if (nextQuarter > 11) {
+          nextQuarter = nextQuarter - 12;
+          nextQuarterYear = currentYearQuarterly + 1;
+        }
+        const lastDayOfQuarter = new Date(nextQuarterYear, nextQuarter + 1, 0).getDate();
+        const targetDayQuarterly = Math.min(dayOfMonth, lastDayOfQuarter);
+        current = new Date(nextQuarterYear, nextQuarter, targetDayQuarterly);
+        current.setHours(0, 0, 0, 0);
         break;
       case "yearly":
-        current = addMonths(current, 12);
+        // Pour annuel, créer une nouvelle date avec le même jour et mois
+        const nextYearForYearly = current.getFullYear() + 1;
+        const lastDayOfYear = new Date(nextYearForYearly, current.getMonth() + 1, 0).getDate();
+        const targetDayYearly = Math.min(dayOfMonth, lastDayOfYear);
+        current = new Date(nextYearForYearly, current.getMonth(), targetDayYearly);
+        current.setHours(0, 0, 0, 0);
         break;
       default:
         return results;
     }
+    
+    // Vérifier qu'on n'a pas dépassé la date de fin
+    if (!isBefore(current, end) && current.getTime() !== end.getTime()) {
+      break;
+    }
+    
     add(current);
   }
 
@@ -168,13 +242,28 @@ async function saveFixedExpense(userId: string, mode: "business" | "personal", e
   
   try {
     const expenseRef = getBudgetDocRef(userId, mode, expense.id);
-    const data = {
-      ...expense,
+    const data: any = {
+      id: expense.id,
+      name: expense.name,
+      amount: expense.amount,
+      startDate: expense.startDate,
+      recurrence: expense.recurrence,
       type: "fixed",
       userId,
       mode,
       updatedAt: new Date().toISOString(),
     };
+    
+    // Ajouter endDate seulement s'il est défini (Firestore n'accepte pas undefined)
+    if (expense.endDate) {
+      data.endDate = expense.endDate;
+    }
+    
+    // Ajouter category seulement s'il est défini
+    if (expense.category) {
+      data.category = expense.category;
+    }
+    
     console.log("💾 Sauvegarde de la dépense fixe:", data);
     await setDoc(expenseRef, data);
     console.log("✅ Dépense fixe sauvegardée avec succès");
@@ -267,6 +356,8 @@ export default function Budget() {
   });
   const [newCategory, setNewCategory] = useState("");
   const [showAddCategory, setShowAddCategory] = useState(false);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   /* -------------------------------
      Derived Calculations
@@ -284,12 +375,261 @@ export default function Budget() {
   const balance = monthlyIncome - (totalFixed + totalVariable);
 
   /* -------------------------------
-     Calendar Generation
+     Calendar Generation with revenu and Expenses
   ------------------------------- */
   const calendarEvents = [
     ...fixedExpenses.flatMap((exp) => generateRecurrenceEvents(exp)),
     ...variableExpenses.map((v) => ({ date: v.date, name: v.name, amount: v.amount })),
   ].sort((a, b) => a.date.localeCompare(b.date));
+
+  // Calculer les revenus et dépenses par jour pour le calendrier
+  const dailyData = useMemo(() => {
+    const data: { [key: string]: { revenu: number; expenses: number; items: Array<{ name: string; amount: number; type: 'revenu' | 'expense' }> } } = {};
+
+    // Ajouter les revenus planifiés (salaire) selon le type
+    if (salary > 0 && salaryStartDate) {
+      // Créer la date de début en utilisant uniquement la date (sans heure) pour éviter les problèmes de fuseau horaire
+      const startDateParts = salaryStartDate.split('-');
+      const startDate = new Date(
+        parseInt(startDateParts[0]),
+        parseInt(startDateParts[1]) - 1,
+        parseInt(startDateParts[2])
+      );
+      // S'assurer que l'heure est à minuit pour éviter les décalages
+      startDate.setHours(0, 0, 0, 0);
+      
+      const monthStart = startOfMonth(currentMonth);
+      monthStart.setHours(0, 0, 0, 0);
+      const monthEnd = endOfMonth(currentMonth);
+      monthEnd.setHours(23, 59, 59, 999);
+      
+      if (salaryType === "biweekly") {
+        // Salaire aux 2 semaines : calculer tous les jours de paie dans le mois
+        let currentPayDate = new Date(startDate);
+        currentPayDate.setHours(0, 0, 0, 0);
+        
+        // Si la date de début est avant le début du mois, trouver le premier jour de paie dans le mois
+        if (currentPayDate < monthStart) {
+          // Calculer combien de jours depuis la date de début jusqu'au début du mois
+          const daysDiff = Math.floor((monthStart.getTime() - currentPayDate.getTime()) / (1000 * 60 * 60 * 24));
+          const periodsToAdd = Math.ceil(daysDiff / 14);
+          currentPayDate = addWeeks(startDate, periodsToAdd * 2);
+          currentPayDate.setHours(0, 0, 0, 0);
+          
+          // Si on dépasse le début du mois, reculer d'une période
+          if (currentPayDate > monthStart) {
+            const prevDate = addWeeks(currentPayDate, -2);
+            prevDate.setHours(0, 0, 0, 0);
+            if (prevDate >= startDate && prevDate < monthStart) {
+              currentPayDate = prevDate;
+            }
+          }
+        }
+        
+        // S'assurer qu'on commence au moins à la date de début
+        if (currentPayDate < startDate) {
+          currentPayDate = new Date(startDate);
+          currentPayDate.setHours(0, 0, 0, 0);
+        }
+        
+        // Ajouter tous les jours de paie dans le mois
+        while (currentPayDate <= monthEnd) {
+          if (isSameMonth(currentPayDate, currentMonth) && currentPayDate >= startDate) {
+            const dateKey = format(currentPayDate, "yyyy-MM-dd");
+            if (!data[dateKey]) {
+              data[dateKey] = { revenu: 0, expenses: 0, items: [] };
+            }
+            data[dateKey].revenu += salary;
+            data[dateKey].items.push({
+              name: "Salaire (aux 2 semaines)",
+              amount: salary,
+              type: 'revenu'
+            });
+          }
+          const nextDate = addWeeks(currentPayDate, 2);
+          nextDate.setHours(0, 0, 0, 0);
+          currentPayDate = nextDate;
+        }
+      } else {
+        // Salaire annuel : mettre le 1er du mois
+        const firstOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+        firstOfMonth.setHours(0, 0, 0, 0);
+        const dateKey = format(firstOfMonth, "yyyy-MM-dd");
+        if (!data[dateKey]) {
+          data[dateKey] = { revenu: 0, expenses: 0, items: [] };
+        }
+        data[dateKey].revenu += monthlyIncome;
+        data[dateKey].items.push({
+          name: "Salaire mensuel",
+          amount: monthlyIncome,
+          type: 'revenu'
+        });
+      }
+    }
+
+    // Ajouter les dépenses fixes récurrentes
+    fixedExpenses.forEach((exp) => {
+      const events = generateRecurrenceEvents(exp);
+      events.forEach((event) => {
+        // Créer la date à partir de la chaîne pour éviter les problèmes de fuseau horaire
+        const eventDateParts = event.date.split('-');
+        const eventDate = new Date(
+          parseInt(eventDateParts[0]),
+          parseInt(eventDateParts[1]) - 1,
+          parseInt(eventDateParts[2])
+        );
+        eventDate.setHours(0, 0, 0, 0);
+        
+        if (isSameMonth(eventDate, currentMonth)) {
+          const dateKey = format(eventDate, "yyyy-MM-dd");
+          if (!data[dateKey]) {
+            data[dateKey] = { revenu: 0, expenses: 0, items: [] };
+          }
+          data[dateKey].expenses += event.amount;
+          data[dateKey].items.push({
+            name: event.name,
+            amount: event.amount,
+            type: 'expense'
+          });
+        }
+      });
+    });
+
+    // Ajouter les dépenses variables du budget
+    variableExpenses.forEach((v) => {
+      // Créer la date à partir des composants pour éviter les problèmes de fuseau horaire
+      const expenseDateParts = v.date.split('-');
+      const expenseDate = new Date(
+        parseInt(expenseDateParts[0]),
+        parseInt(expenseDateParts[1]) - 1,
+        parseInt(expenseDateParts[2])
+      );
+      expenseDate.setHours(0, 0, 0, 0);
+      
+      if (isSameMonth(expenseDate, currentMonth)) {
+        const dateKey = format(expenseDate, "yyyy-MM-dd");
+        if (!data[dateKey]) {
+          data[dateKey] = { revenu: 0, expenses: 0, items: [] };
+        }
+        data[dateKey].expenses += v.amount;
+        data[dateKey].items.push({
+          name: v.name,
+          amount: v.amount,
+          type: 'expense'
+        });
+      }
+    });
+
+    // Ajouter les transactions réelles (revenus et dépenses)
+    console.log("📊 Transactions à traiter pour le calendrier:", transactions.length);
+    console.log("📅 Mois actuel:", format(currentMonth, "yyyy-MM"));
+    console.log("🔍 Mode actuel:", currentMode);
+    
+    transactions.forEach((transaction) => {
+      try {
+        // Créer la date à partir des composants pour éviter les problèmes de fuseau horaire
+        const transactionDateParts = transaction.date.split('-');
+        const transactionDate = new Date(
+          parseInt(transactionDateParts[0]),
+          parseInt(transactionDateParts[1]) - 1,
+          parseInt(transactionDateParts[2])
+        );
+        transactionDate.setHours(0, 0, 0, 0);
+        
+        if (isSameMonth(transactionDate, currentMonth)) {
+          const dateKey = format(transactionDate, "yyyy-MM-dd");
+          if (!data[dateKey]) {
+            data[dateKey] = { revenu: 0, expenses: 0, items: [] };
+          }
+
+          // Exclure les transferts entre comptes en mode personnel
+          const isTransferBetweenAccounts = 
+            currentMode === "personal" && 
+            transaction.type === "transfert" && 
+            transaction.transferType === "between_accounts";
+
+          if (isTransferBetweenAccounts) {
+            // Ignorer les transferts entre comptes
+            return;
+          }
+
+          // Identifier les revenus EN PREMIER
+          // "income" et "revenu" sont la même chose (revenu) - "income" est le terme anglais pour "revenu"
+          const isrevenu = transaction.type === "income" || transaction.type === "revenu";
+
+          // Identifier les dépenses (seulement si ce n'est PAS un revenu)
+          // En mode personnel: "depense", "remboursement", "paiement_facture", "transfert" (between_persons)
+          // En mode business: "expense"
+          const isExpense = !isrevenu && (
+            (currentMode === "personal" && (
+              transaction.type === "depense" || 
+              transaction.type === "remboursement" || 
+              transaction.type === "paiement_facture" ||
+              (transaction.type === "transfert" && transaction.transferType === "between_persons")
+            )) ||
+            (currentMode === "business" && transaction.type === "expense")
+          );
+
+          console.log(`🔍 Transaction analysée: date=${transaction.date}, type=${transaction.type}, mode=${currentMode}, amount=${transaction.amount}, isrevenu=${isrevenu}, isExpense=${isExpense}`);
+
+          // Toujours ajouter la transaction aux items pour l'affichage
+          if (isrevenu) {
+            data[dateKey].revenu += transaction.amount;
+            data[dateKey].items.push({
+              name: transaction.description || "Revenu",
+              amount: transaction.amount,
+              type: 'revenu'
+            });
+            console.log(`✅ Revenu ajouté au calendrier: ${dateKey}, ${transaction.description || "Revenu"}, ${transaction.amount} $`);
+          } else if (isExpense) {
+            // S'assurer que le montant est positif pour les dépenses (il sera affiché comme négatif)
+            const expenseAmount = Math.abs(transaction.amount);
+            data[dateKey].expenses += expenseAmount;
+            data[dateKey].items.push({
+              name: transaction.description || "Dépense",
+              amount: expenseAmount,
+              type: 'expense'
+            });
+            console.log(`✅ Dépense ajoutée au calendrier: ${dateKey}, ${transaction.description || "Dépense"}, ${expenseAmount} $ (sera affiché comme -${expenseAmount} $)`);
+          } else {
+            // Même si non classée, afficher la transaction avec son type réel
+            const transactionType = transaction.type === "income" ? "revenu" : 
+                                   transaction.type === "expense" ? "expense" : 
+                                   transaction.type === "depense" ? "expense" : "expense";
+            
+            if (transactionType === "revenu") {
+              data[dateKey].revenu += transaction.amount;
+            } else {
+              data[dateKey].expenses += transaction.amount;
+            }
+            
+            data[dateKey].items.push({
+              name: transaction.description || `Transaction (${transaction.type})`,
+              amount: transaction.amount,
+              type: transactionType as 'revenu' | 'expense'
+            });
+            console.log(`⚠️ Transaction non classée mais affichée: ${transaction.date}, type: ${transaction.type}, mode: ${currentMode}, amount: ${transaction.amount}`);
+          }
+        }
+      } catch (error) {
+        console.error("Erreur lors du traitement de la transaction pour le calendrier:", transaction, error);
+      }
+    });
+    
+    console.log("📊 Données du calendrier générées:", Object.keys(data).length, "jours");
+
+    return data;
+  }, [fixedExpenses, variableExpenses, salary, salaryType, salaryStartDate, monthlyIncome, currentMonth, currentMode, transactions]);
+
+  // Générer les jours du calendrier
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 }); // Semaine commence lundi
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+
+    return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+  }, [currentMonth]);
 
   /* -------------------------------
      Load Companies
@@ -372,6 +712,28 @@ export default function Budget() {
   }, [userId, currentMode]);
 
   /* -------------------------------
+     Load Transactions
+  ------------------------------- */
+  useEffect(() => {
+    if (!userId || !db) return;
+
+    const loadTransactions = async () => {
+      try {
+        const year = currentMonth.getFullYear();
+        console.log("📥 Chargement des transactions pour l'année:", year, "mode:", currentMode);
+        const allTransactions = await getTransactions(year, currentMode);
+        console.log("✅ Transactions chargées:", allTransactions.length);
+        console.log("📊 Types de transactions:", allTransactions.map(t => ({ date: t.date, type: t.type, amount: t.amount })));
+        setTransactions(allTransactions);
+      } catch (error) {
+        console.error("Erreur lors du chargement des transactions:", error);
+      }
+    };
+
+    loadTransactions();
+  }, [userId, currentMode, currentMonth]);
+
+  /* -------------------------------
      Save Settings
   ------------------------------- */
   useEffect(() => {
@@ -403,6 +765,7 @@ export default function Budget() {
       startDate: data.get("startDate") as string,
       endDate: data.get("endDate") as string || undefined,
       recurrence: data.get("recurrence") as RecurrenceType,
+      category: data.get("category") as string || undefined,
     };
 
     try {
@@ -793,21 +1156,112 @@ export default function Budget() {
          CALENDRIER
       ----------------------------------------------------- */}
       <div className="p-4 border rounded-lg mb-6">
-        <h2 className="font-semibold text-lg mb-3">Calendrier des dépenses</h2>
-
-        {calendarEvents.length === 0 ? (
-          <p className="text-muted-foreground">Aucune dépense planifiée.</p>
-        ) : (
-          <div className="space-y-2">
-            {calendarEvents.map((ev, i) => (
-              <div key={i} className="p-3 border rounded flex justify-between">
-                <span>{ev.date}</span>
-                <span>{ev.name}</span>
-                <span>{ev.amount.toFixed(2)} $</span>
-              </div>
-            ))}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-lg">Calendrier des revenus et dépenses</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+              className="p-2 border rounded hover:bg-secondary transition-colors"
+              aria-label="Mois précédent"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-medium min-w-[150px] text-center">
+              {format(currentMonth, "MMMM yyyy")}
+            </span>
+            <button
+              onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
+              className="p-2 border rounded hover:bg-secondary transition-colors"
+              aria-label="Mois suivant"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-        )}
+        </div>
+
+        {/* En-têtes des jours de la semaine */}
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((day) => (
+            <div key={day} className="text-center text-sm font-semibold text-muted-foreground py-2">
+              {day}
+            </div>
+          ))}
+        </div>
+
+        {/* Grille du calendrier */}
+        <div className="grid grid-cols-7 gap-1">
+          {calendarDays.map((day, idx) => {
+            const dateKey = format(day, "yyyy-MM-dd");
+            const dayData = dailyData[dateKey] || { revenu: 0, expenses: 0, items: [] };
+            const isCurrentMonth = isSameMonth(day, currentMonth);
+            const isToday = isSameDay(day, new Date());
+
+            return (
+              <div
+                key={idx}
+                className={`min-h-[100px] border rounded p-2 ${
+                  !isCurrentMonth ? "bg-muted/30 opacity-50" : "bg-card"
+                } ${isToday ? "ring-2 ring-primary" : ""}`}
+              >
+                <div className={`text-sm font-medium mb-1 ${isToday ? "text-primary" : ""}`}>
+                  {format(day, "d")}
+                </div>
+                <div className="space-y-1 text-xs">
+                  {dayData.items.length > 0 ? (
+                    <div className="space-y-0.5">
+                      {dayData.items.slice(0, 3).map((item, i) => {
+                        // Pour les dépenses, afficher le montant comme négatif
+                        // Le montant stocké est toujours positif, on l'affiche négatif pour les dépenses
+                        let displayAmount: number;
+                        if (item.type === "expense") {
+                          displayAmount = -Math.abs(item.amount);
+                        } else {
+                          displayAmount = Math.abs(item.amount);
+                        }
+                        
+                        const sign = displayAmount >= 0 ? "+" : "";
+                        const amountStr = `${sign}${displayAmount.toFixed(2)} $`;
+                        
+                        return (
+                          <div
+                            key={i}
+                            className={`truncate ${
+                              item.type === "revenu" ? "text-green-600" : "text-red-600"
+                            }`}
+                            title={`${item.name}: ${amountStr}`}
+                          >
+                            {amountStr} - {item.name}
+                          </div>
+                        );
+                      })}
+                      {dayData.items.length > 3 && (
+                        <div className="text-muted-foreground text-[10px]">
+                          +{dayData.items.length - 3} autre(s)
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    isCurrentMonth && (
+                      <div className="text-muted-foreground text-[10px]">—</div>
+                    )
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Légende */}
+        <div className="flex items-center gap-4 mt-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-green-600 rounded"></div>
+            <span>Revenus</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-red-600 rounded"></div>
+            <span>Dépenses</span>
+          </div>
+        </div>
       </div>
 
       {/* -----------------------------------------------------
@@ -870,6 +1324,72 @@ export default function Budget() {
                 <option value="quarterly">Trimestriel</option>
                 <option value="yearly">Annuel</option>
               </select>
+
+              {/* Catégorie */}
+              <div>
+                <label htmlFor="fixed-category" className="block text-sm font-medium text-foreground mb-2">
+                  Catégorie
+                </label>
+                {!showAddCategory ? (
+                  <div className="space-y-2">
+                    <select
+                      id="fixed-category"
+                      name="category"
+                      defaultValue={editFixed?.category || ""}
+                      className="border p-2 rounded w-full"
+                      aria-label="Catégorie"
+                      onChange={(e) => {
+                        if (e.target.value === "custom") {
+                          setShowAddCategory(true);
+                        }
+                      }}
+                    >
+                      <option value="">Sélectionner une catégorie</option>
+                      <option value="Habitation">Habitation</option>
+                      <option value="Abonnements">Abonnements</option>
+                      <option value="Loisirs">Loisirs</option>
+                      <option value="Électricité">Électricité</option>
+                      <option value="Remboursement">Remboursement</option>
+                      <option value="Dettes">Dettes</option>
+                      <option value="Autres">Autres</option>
+                      {customCategories.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                      <option value="custom">+ Personnaliser</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomCategory())}
+                      placeholder="Nouvelle catégorie"
+                      className="flex-1 px-3 py-2 border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={addCustomCategory}
+                      className="px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
+                      aria-label="Ajouter la catégorie"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddCategory(false);
+                        setNewCategory("");
+                      }}
+                      className="px-3 py-2 border border-border rounded-lg hover:opacity-90 transition-opacity"
+                      aria-label="Annuler"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" className="p-2 border rounded" onClick={() => setShowFixedModal(false)}>

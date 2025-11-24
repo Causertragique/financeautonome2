@@ -24,7 +24,7 @@ export interface Transaction {
   description?: string;
   category?: string;
   date: string; // "YYYY-MM-DD"
-  type: "income" | "expense" | "depense" | "transfert" | "remboursement" | "paiement_facture" | "revenue";
+  type: "income" | "expense" | "depense" | "transfert" | "remboursement" | "paiement_facture" | "revenu";
   company?: string; // Pour mode business
   account?: string; // Pour mode personal (nom du compte)
   accountTo?: string; // Pour transfert entre comptes (compte de destination)
