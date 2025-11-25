@@ -1,313 +1,432 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
+import { Lightbulb, ShieldCheck, Folder, Link2, Plus, X } from "lucide-react";
 import MainLayout from "../layouts/MainLayout";
-import { Plus, PiggyBank, TrendingUp, Target, Calendar, Info } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
-// Composant ProgressBar sans style inline
-const ProgressBar = ({ progress, className = "" }: { progress: number; className?: string }) => {
-  const barRef = useRef<HTMLDivElement>(null);
-  
-  useEffect(() => {
-    if (barRef.current) {
-      barRef.current.style.setProperty("--progress-width", `${Math.min(progress, 100)}%`);
-    }
-  }, [progress]);
-  
-  return (
-    <div
-      ref={barRef}
-      className={`h-2 rounded-full transition-all progress-bar ${className}`}
-    />
-  );
-};
+// Exemples de prompts pour l’IA
+const aiPrompts = [
+  "Découper mon objectif d’épargne en étapes concrètes",
+  "Trouver des outils numériques pour organiser un projet",
+  "Créer une checklist personnalisée pour avancer",
+  "Idées pour garder la motivation (micro-défis, rappels, etc.)"
+];
 
-// Produits d'épargne courants au Québec
-const savingsTypes = [
-  { 
-    value: "celi", 
-    label: "CELI (Compte d'épargne libre d'impôt)", 
-    icon: "📈",
-    description: "Contribution maximale: 95 000 $ (2025). Gains non imposables.",
-    maxContribution: 95000,
+// Liens ressources officielles & utiles
+const resourceLinks = [
+  {
+    label: "Autorité des marchés financiers (AMF)",
+    url: "https://lautorite.qc.ca/"
   },
-  { 
-    value: "reer", 
-    label: "REER (Régime enregistré d'épargne-retraite)", 
-    icon: "🏦",
-    description: "Déductible d'impôt. Plafond: 18% du revenu gagné ou 32 490 $ (2025).",
-    maxContribution: 32490,
+  {
+    label: "Agence du revenu du Canada (ARC)",
+    url: "https://www.canada.ca/fr/agence-revenu.html"
   },
-  { 
-    value: "celiapp", 
-    label: "CELIAPP (Compte d'épargne libre d'impôt pour l'achat d'une première propriété)", 
-    icon: "🏠",
-    description: "Maximum 8 000 $ par année, plafond de 40 000 $ à vie.",
-    maxContribution: 40000,
+  {
+    label: "Revenu Québec",
+    url: "https://www.revenuquebec.ca/"
   },
-  { 
-    value: "reee", 
-    label: "REEE (Régime enregistré d'épargne-études)", 
-    icon: "🎓",
-    description: "Subvention gouvernementale jusqu'à 500 $ par année. Maximum 50 000 $ par bénéficiaire.",
-    maxContribution: 50000,
+  {
+    label: "Programme d’éducation financière de l’AMF",
+    url: "https://lautorite.qc.ca/grand-public/etre-bien-outille/education-financiere"
   },
-  { 
-    value: "epargne_taxable", 
-    label: "Compte épargne taxable", 
-    icon: "💰",
-    description: "Compte d'épargne standard, gains imposables.",
-    maxContribution: null,
-  },
-  { 
-    value: "epargne_urgence", 
-    label: "Fonds d'urgence", 
-    icon: "🚨",
-    description: "Épargne pour les urgences (3-6 mois de dépenses).",
-    maxContribution: null,
-  },
+  {
+    label: "Calculatrice d’épargne de l’AMF",
+    url: "https://lautorite.qc.ca/grand-public/outils/calculatrice-d-epargne/"
+  }
 ];
 
 export default function Savings() {
-  const [showAddSaving, setShowAddSaving] = useState(false);
-  const [savings, setSavings] = useState<Array<{
-    id: string;
-    name: string;
-    type: string;
-    balance: number;
-    contribution: number;
-    target: number;
-    institution: string;
-    annualContribution: number;
-  }>>([]);
+  // Espace IA
+  const [userQuery, setUserQuery] = useState("");
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const totalSavings = savings.reduce((sum, s) => sum + s.balance, 0);
-  const totalTarget = savings.reduce((sum, s) => sum + s.target, 0);
-  const progressPercentage = totalTarget > 0 ? (totalSavings / totalTarget) * 100 : 0;
+  // Espace Projets utilisateur (exemple local, à brancher sur DB ou cloud)
+  const [projects, setProjects] = useState<{ 
+    name: string; 
+    note: string; 
+    targetAmount?: number; 
+    period?: string; 
+    duration?: number;
+    amountPerPeriod?: number;
+  }[]>([]);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectNote, setNewProjectNote] = useState("");
+  const [targetAmount, setTargetAmount] = useState("");
+  const [period, setPeriod] = useState<"weekly" | "biweekly" | "monthly">("monthly");
+  const [duration, setDuration] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const getSavingsTypeInfo = (type: string) => {
-    return savingsTypes.find(t => t.value === type) || savingsTypes[0];
+  // IA bridée — plugger ta logique ici si tu veux utiliser l’API OpenAI/ChatGPT
+  const handlePrompt = async (prompt: string) => {
+    setLoading(true);
+    setAiSuggestion(null);
+    // Appel IA simulé
+    setTimeout(() => {
+      setAiSuggestion(
+        "Voici une inspiration IA : Décomposez votre projet en étapes simples et mesurables, fixez des dates butoirs, et automatisez le suivi avec des outils comme Notion ou Google Sheets. Rappelez-vous, ceci n’est pas un conseil financier."
+      );
+      setLoading(false);
+    }, 900);
+  };
+
+  // Calcul du montant par période
+  const calculateAmountPerPeriod = () => {
+    const target = parseFloat(targetAmount);
+    const dur = parseFloat(duration);
+    
+    if (!target || !dur || dur <= 0) return null;
+    
+    // La durée est directement le nombre de versements
+    return (target / dur).toFixed(2);
+  };
+
+  // Calcul de la durée totale en mois pour affichage
+  const calculateTotalMonths = () => {
+    const dur = parseFloat(duration);
+    if (!dur || dur <= 0) return null;
+    
+    switch (period) {
+      case "weekly":
+        return (dur / 4).toFixed(1); // Approximation : 4 semaines par mois
+      case "biweekly":
+        return (dur / 2).toFixed(1); // 2 périodes bi-mensuelles par mois
+      case "monthly":
+        return dur.toFixed(0);
+      default:
+        return null;
+    }
+  };
+
+  const amountPerPeriod = calculateAmountPerPeriod();
+
+  // Ajout projet utilisateur
+  const addProject = () => {
+    if (!newProjectName.trim()) return;
+    const projectData: {
+      name: string;
+      note: string;
+      targetAmount?: number;
+      period?: string;
+      duration?: number;
+      amountPerPeriod?: number;
+    } = {
+      name: newProjectName.trim(),
+      note: newProjectNote.trim()
+    };
+    
+    if (targetAmount && duration) {
+      projectData.targetAmount = parseFloat(targetAmount);
+      projectData.period = period;
+      projectData.duration = parseFloat(duration);
+      if (amountPerPeriod) {
+        projectData.amountPerPeriod = parseFloat(amountPerPeriod);
+      }
+    }
+    
+    setProjects([...projects, projectData]);
+    setNewProjectName("");
+    setNewProjectNote("");
+    setTargetAmount("");
+    setPeriod("monthly");
+    setDuration("");
+    setIsModalOpen(false);
+  };
+
+  const removeProject = (index: number) => {
+    setProjects(projects.filter((_, i) => i !== index));
   };
 
   return (
     <MainLayout>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Épargne</h1>
-        <p className="text-muted-foreground">
-          Gérez vos comptes d'épargne et produits financiers québécois
-        </p>
+      <div className="max-w-5xl mx-auto space-y-4 p-4">
+        {/* Première ligne : IA et Projets côte à côte */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Section 1 — IA */}
+          <section className="bg-card border border-border rounded-lg p-4 flex flex-col shadow-lg">
+        <div className="flex items-center gap-2 mb-2">
+          <Lightbulb className="w-4 h-4 text-primary" />
+          <h2 className="text-base font-bold">Inspiration IA</h2>
+        </div>
+        <div className="mb-2 text-xs text-muted-foreground">
+          Posez vos questions pour structurer vos projets d’épargne, organiser vos idées, trouver des outils — <b>jamais de conseil financier</b>.
+        </div>
+        <div className="bg-muted/30 border-l-4 border-yellow-400 text-yellow-900 px-3 py-1.5 mb-3 rounded text-xs">
+          L'IA ne remplace jamais un professionnel agréé. Les suggestions sont strictement organisationnelles.
+        </div>
+        {/* Prompts rapides */}
+        <div className="mb-3">
+          <ul className="grid gap-1.5">
+            {aiPrompts.map((prompt, i) => (
+              <li key={i}>
+                <button
+                  className="w-full px-2 py-1.5 bg-secondary rounded-md hover:bg-secondary/80 text-left transition text-xs"
+                  onClick={() => handlePrompt(prompt)}
+                  disabled={loading}
+                >
+                  {prompt}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {/* Zone question personnalisée */}
+        <div className="flex gap-2 mb-2">
+          <label htmlFor="userQuery" className="sr-only">Question personnalisée</label>
+          <input
+            id="userQuery"
+            type="text"
+            value={userQuery}
+            onChange={e => setUserQuery(e.target.value)}
+            className="flex-1 px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none"
+            placeholder="Ex: Comment planifier un défi d’épargne ?"
+            disabled={loading}
+          />
+          <button
+            onClick={() => handlePrompt(userQuery)}
+            className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50"
+            disabled={loading || userQuery.trim() === ""}
+          >
+            Demander
+          </button>
+        </div>
+        {loading && <div className="text-xs text-muted-foreground">L'IA réfléchit…</div>}
+        {aiSuggestion && (
+          <div className="bg-muted/40 rounded p-2 border mt-2 text-xs">
+            <b>Suggestion IA :</b> <span>{aiSuggestion}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
+          <ShieldCheck className="w-3.5 h-3.5 text-green-700" />
+          <span>
+            Conformité réglementaire assurée. Aucune promesse, aucun conseil d’investissement.
+          </span>
+        </div>
+      </section>
+
+      {/* Section 2 — Projets utilisateur */}
+      <section className="bg-card border border-border rounded-lg p-4 flex flex-col shadow-lg">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Folder className="w-4 h-4 text-blue-600" />
+            <h2 className="text-base font-bold">Mes projets d'épargne</h2>
+          </div>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-primary text-primary-foreground rounded-md hover:opacity-90 transition"
+          >
+            <Plus className="w-3 h-3" />
+            Ajouter un projet
+          </button>
+        </div>
+        <div className="mb-3 text-muted-foreground text-xs">
+          Sauvegardez vos projets ici. Notez vos étapes, suivez l'avancement, ajoutez ou supprimez à volonté.
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {projects.length === 0 && (
+            <div className="text-muted-foreground text-xs text-center py-8">
+              Aucun projet sauvegardé pour l'instant.
+            </div>
+          )}
+          <ul className="space-y-2">
+            {projects.map((proj, i) => (
+              <li key={i} className="border rounded-md p-2 bg-muted/50 flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="font-semibold text-sm">{proj.name}</div>
+                  {proj.targetAmount && proj.amountPerPeriod && (
+                    <div className="text-xs text-primary font-medium mt-1">
+                      Objectif: {proj.targetAmount.toFixed(2)} $ • {proj.amountPerPeriod.toFixed(2)} $ / {proj.period === "weekly" ? "semaine" : proj.period === "biweekly" ? "2 semaines" : "mois"}
+                    </div>
+                  )}
+                  {proj.note && (
+                    <div className="text-xs text-muted-foreground mt-1">{proj.note}</div>
+                  )}
+                </div>
+                <button
+                  className="text-destructive ml-2 text-xs underline hover:text-destructive/80"
+                  onClick={() => removeProject(i)}
+                  title="Supprimer"
+                >
+                  Supprimer
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+        </div>
+
+        {/* Deuxième ligne : Ressources sur toute la largeur */}
+        {/* Section 3 — Ressources et liens */}
+        <section className="bg-card border border-border rounded-lg p-4 flex flex-col shadow-lg">
+        <div className="flex items-center gap-2 mb-2">
+          <Link2 className="w-4 h-4 text-purple-600" />
+          <h2 className="text-base font-bold">En apprendre un peu plus...</h2>
+        </div>
+        <div className="mb-2 text-muted-foreground text-xs">
+          Informez-vous avec des sources reconnues :
+        </div>
+        <ul className="space-y-2 mb-3">
+          {resourceLinks.map((link, i) => (
+            <li key={i}>
+              <a
+                href={link.url}
+                className="text-primary underline hover:text-primary/80 transition"
+                target="_blank" rel="noopener noreferrer"
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+        <div className="text-xs text-muted-foreground mt-auto">
+          L'information, c'est le vrai pouvoir. Toutes ces ressources sont neutres et fiables.
+        </div>
+        </section>
       </div>
 
-      {/* Statistiques globales */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Épargne totale</CardTitle>
-            <PiggyBank className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {totalSavings.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
+      {/* Modal pour ajouter un projet */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-lg p-4 max-w-md w-full shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold">Ajouter un projet</h3>
+              <button
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setNewProjectName("");
+                  setNewProjectNote("");
+                  setTargetAmount("");
+                  setPeriod("monthly");
+                  setDuration("");
+                }}
+                className="text-muted-foreground hover:text-foreground transition"
+                aria-label="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <p className="text-xs text-muted-foreground">Sur {savings.length} compte{savings.length > 1 ? "s" : ""}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Objectif total</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {totalTarget.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {progressPercentage.toFixed(0)}% atteint
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Reste à épargner</CardTitle>
-            <TrendingUp className="h-4 w-4 text-success" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-success">
-              {(totalTarget - totalSavings).toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
-            </div>
-            <p className="text-xs text-muted-foreground">Pour atteindre l'objectif</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Liste des comptes d'épargne */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Mes comptes d'épargne</CardTitle>
-              <CardDescription>Vue d'ensemble de vos produits d'épargne</CardDescription>
-            </div>
-            <Button onClick={() => setShowAddSaving(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Ajouter un compte
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {savings.map((saving) => {
-              const typeInfo = getSavingsTypeInfo(saving.type);
-              const progress = saving.target > 0 ? (saving.balance / saving.target) * 100 : 0;
-              const contributionProgress = typeInfo.maxContribution 
-                ? (saving.contribution / typeInfo.maxContribution) * 100 
-                : null;
-
-              return (
-                <Card key={saving.id} className="border-2">
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <span className="text-3xl">{typeInfo.icon}</span>
-                        <div>
-                          <CardTitle className="text-lg">{saving.name}</CardTitle>
-                          <CardDescription>
-                            {saving.institution} • {typeInfo.label}
-                          </CardDescription>
-                        </div>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Solde actuel</p>
-                          <p className="text-2xl font-bold">
-                            {saving.balance.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Objectif</p>
-                          <p className="text-2xl font-bold">
-                            {saving.target.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-sm text-muted-foreground">Progression vers l'objectif</p>
-                          <p className="text-sm font-medium">{progress.toFixed(0)}%</p>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <ProgressBar progress={Math.min(progress, 100)} className="bg-success" />
-                        </div>
-                      </div>
-
-                      {contributionProgress !== null && (
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="text-sm text-muted-foreground">
-                              Contribution: {saving.contribution.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })} / {typeInfo.maxContribution?.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
-                            </p>
-                            <p className="text-sm font-medium">{contributionProgress.toFixed(0)}%</p>
-                          </div>
-                          <div className="w-full bg-muted rounded-full h-2">
-                            <ProgressBar
-                              progress={Math.min(contributionProgress, 100)}
-                              className={
-                                contributionProgress >= 100 ? "bg-destructive" : contributionProgress > 80 ? "bg-warning" : "bg-primary"
-                              }
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {saving.annualContribution > 0 && (
-                        <div className="p-3 bg-muted/50 rounded-lg">
-                          <p className="text-sm text-muted-foreground">Contribution annuelle prévue</p>
-                          <p className="font-semibold">
-                            {saving.annualContribution.toLocaleString("fr-CA", { style: "currency", currency: "CAD" })}
-                          </p>
-                        </div>
-                      )}
-
-                      <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
-                        <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-blue-900 dark:text-blue-100">{typeInfo.description}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Dialog pour ajouter un compte d'épargne */}
-      <Dialog open={showAddSaving} onOpenChange={setShowAddSaving}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Ajouter un compte d'épargne</DialogTitle>
-            <DialogDescription>
-              Ajoutez un nouveau produit d'épargne à votre profil
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label htmlFor="saving-name">Nom du compte</Label>
-              <Input id="saving-name" placeholder="Ex: CELI principal" />
-            </div>
-            <div>
-              <Label htmlFor="saving-type">Type de compte</Label>
-              <select id="saving-type" aria-label="Type de compte" className="w-full px-3 py-2 border rounded-lg">
-                {savingsTypes.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.icon} {type.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label htmlFor="institution">Institution financière</Label>
-              <Input id="institution" placeholder="Ex: Desjardins, Banque Nationale, RBC..." />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
               <div>
-                <Label htmlFor="balance">Solde actuel</Label>
-                <Input id="balance" type="number" step="0.01" placeholder="0.00" />
+                <label htmlFor="modalProjectName" className="block text-xs font-medium mb-1">
+                  Nom du projet *
+                </label>
+                <input
+                  id="modalProjectName"
+                  type="text"
+                  value={newProjectName}
+                  onChange={e => setNewProjectName(e.target.value)}
+                  placeholder="Ex: Voyage en Europe"
+                  className="w-full px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newProjectName.trim()) {
+                      addProject();
+                    }
+                  }}
+                />
               </div>
               <div>
-                <Label htmlFor="target">Objectif (optionnel)</Label>
-                <Input id="target" type="number" step="0.01" placeholder="0.00" />
+                <label htmlFor="targetAmount" className="block text-xs font-medium mb-1">
+                  Objectif financier ($)
+                </label>
+                <input
+                  id="targetAmount"
+                  type="number"
+                  value={targetAmount}
+                  onChange={e => setTargetAmount(e.target.value)}
+                  placeholder="Ex: 5000"
+                  min="0"
+                  step="0.01"
+                  className="w-full px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label htmlFor="period" className="block text-xs font-medium mb-1">
+                    Période
+                  </label>
+                  <select
+                    id="period"
+                    value={period}
+                    onChange={e => setPeriod(e.target.value as "weekly" | "biweekly" | "monthly")}
+                    className="w-full px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="weekly">Hebdomadaire</option>
+                    <option value="biweekly">Bi-mensuel</option>
+                    <option value="monthly">Mensuel</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="duration" className="block text-xs font-medium mb-1">
+                    Durée (mois)
+                  </label>
+                  <input
+                    id="duration"
+                    type="number"
+                    value={duration}
+                    onChange={e => setDuration(e.target.value)}
+                    placeholder="Ex: 12"
+                    min="1"
+                    className="w-full px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+
+              {amountPerPeriod && (
+                <div className="bg-primary/10 border border-primary/20 rounded-md p-3">
+                  <div className="text-xs font-medium text-primary mb-1">
+                    Montant à épargner par période :
+                  </div>
+                  <div className="text-lg font-bold text-primary">
+                    {amountPerPeriod} $
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {period === "weekly" && "par semaine"}
+                    {period === "biweekly" && "aux deux semaines"}
+                    {period === "monthly" && "par mois"}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="modalProjectNote" className="block text-xs font-medium mb-1">
+                  Notes, étapes, objectifs
+                </label>
+                <textarea
+                  id="modalProjectNote"
+                  value={newProjectNote}
+                  onChange={e => setNewProjectNote(e.target.value)}
+                  placeholder="Notes, étapes, objectifs…"
+                  rows={3}
+                  className="w-full px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={addProject}
+                  className="flex-1 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50 transition"
+                  disabled={!newProjectName.trim()}
+                >
+                  Ajouter le projet
+                </button>
+                <button
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setNewProjectName("");
+                  setNewProjectNote("");
+                  setTargetAmount("");
+                  setPeriod("monthly");
+                  setDuration("");
+                }}
+                  className="px-3 py-1.5 text-sm bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition"
+                >
+                  Annuler
+                </button>
               </div>
             </div>
-            <div>
-              <Label htmlFor="annual-contribution">Contribution annuelle prévue (optionnel)</Label>
-              <Input id="annual-contribution" type="number" step="0.01" placeholder="0.00" />
-            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddSaving(false)}>
-              Annuler
-            </Button>
-            <Button onClick={() => setShowAddSaving(false)}>Ajouter</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </MainLayout>
   );
 }
-

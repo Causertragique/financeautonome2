@@ -1,6 +1,3 @@
-// src/pages/Terms.tsx
-
-import React from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -53,7 +50,7 @@ export default function Terms() {
 
           <h2 className="text-xl font-semibold mt-8 mb-2">3. Compte utilisateur</h2>
           <p className="mb-4">
-            Vous êtes responsable de la confidentialité de vos informations de connexion et de toutes les activités qui se produisent sous votre compte. En cas de suspicion d'utilisation non autorisée, veuillez nous contacter immédiatement à <a href="mailto:support@novafinance.app" className="text-primary underline">support@novafinance.app</a>.
+            Vous êtes responsable de la confidentialité de vos informations de connexion et de toutes les activités qui se produisent sous votre compte. En cas de suspicion d'utilisation non autorisée, veuillez nous contacter immédiatement à <a href="mailto:info@guillaumehetu.com" className="text-primary underline">info@guillaumehetu.com</a>.
           </p>
 
           <h2 className="text-xl font-semibold mt-8 mb-2">4. Propriété intellectuelle</h2>
@@ -74,7 +71,32 @@ export default function Terms() {
             Vos données personnelles sont traitées conformément à notre <Link to="/privacy" className="text-primary underline">Politique de confidentialité</Link>. En utilisant NovaFinance, vous acceptez également les termes de cette politique.
           </p>
 
-          <h2 className="text-xl font-semibold mt-8 mb-2">7. Modification et résiliation</h2>
+          {/* SECTION AJOUTÉE POUR L’ASSISTANT IA */}
+          <h2 className="text-xl font-semibold mt-8 mb-2">7. Limites et avertissement concernant l’assistant IA</h2>
+          <div className="mb-4 space-y-3 text-muted-foreground">
+            <p>
+              L’assistant IA intégré à NovaFinance est exclusivement conçu pour accompagner l’utilisateur dans l’organisation et la structuration de projets d’épargne, à des fins éducatives et informationnelles.
+            </p>
+            <p>
+              <strong>L’assistant IA n’est pas un conseiller financier et ne fournit aucun conseil personnalisé.</strong>
+            </p>
+            <ul className="list-disc list-inside ml-4">
+              <li>Ne donne jamais de recommandations personnalisées en matière d’investissement, d’épargne, de placement ou de fiscalité</li>
+              <li>Ne suggère ni produit, ni institution, ni montant, ni stratégie d’investissement</li>
+              <li>Ne propose aucune prévision de rendement, de gain, ou de performance</li>
+              <li>Ne garantit aucun résultat, ni ne recommande d’actions, d’obligations, de cryptomonnaies, ou autres produits financiers</li>
+              <li>Refuse systématiquement toute question pouvant être interprétée comme une demande de conseil financier, fiscal ou d’investissement</li>
+              <li>Encourage l’utilisateur à consulter un professionnel qualifié et agréé ou à se référer à l’Autorité des marchés financiers (AMF) pour toute question réglementaire</li>
+            </ul>
+            <p>
+              Toute tentative d’obtenir des conseils financiers, fiscaux ou de placement entraînera une réponse de refus et un rappel de consulter un professionnel.
+            </p>
+            <p>
+              L’utilisateur demeure seul responsable de ses décisions financières et de la vérification des informations auprès de sources officielles.
+            </p>
+          </div>
+
+          <h2 className="text-xl font-semibold mt-8 mb-2">8. Modification et résiliation</h2>
           <p className="mb-4">
             Nous nous réservons le droit de modifier les présentes conditions d'utilisation à tout moment. En cas de modification significative, nous vous en informerons par email ou via une notification dans l'application. Votre utilisation continue du service après ces modifications constitue votre acceptation des nouvelles conditions.
           </p>
@@ -82,14 +104,14 @@ export default function Terms() {
             Vous pouvez supprimer votre compte à tout moment depuis les paramètres de votre compte. Nous nous réservons également le droit de suspendre ou de résilier votre compte en cas de violation de ces conditions.
           </p>
 
-          <h2 className="text-xl font-semibold mt-8 mb-2">8. Droit applicable</h2>
+          <h2 className="text-xl font-semibold mt-8 mb-2">9. Droit applicable</h2>
           <p className="mb-4">
             Les présentes conditions d'utilisation sont régies par les lois applicables. Tout litige sera soumis à la juridiction compétente.
           </p>
 
-          <h2 className="text-xl font-semibold mt-8 mb-2">9. Contact</h2>
+          <h2 className="text-xl font-semibold mt-8 mb-2">10. Contact</h2>
           <p className="mb-4">
-            Pour toute question concernant ces conditions d'utilisation, contactez-nous à l'adresse suivante : <a href="mailto:support@novafinance.app" className="text-primary underline">support@novafinance.app</a>
+            Pour toute question concernant ces conditions d'utilisation, contactez-nous à l'adresse suivante : <a href="mailto:info@guillaumehetu.com" className="text-primary underline">info@guillaumehetu.com</a>
           </p>
 
           <div className="mt-8 pt-6 border-t border-border">

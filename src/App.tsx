@@ -26,6 +26,7 @@ import Budget from "./pages/Budget";
 import Accounts from "./pages/Accounts";
 import Cards from "./pages/Cards";
 import Savings from "./pages/Savings";
+import Epargne from "./pages/Epargne";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
@@ -151,6 +152,14 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <Savings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/epargne"
+                element={
+                  <ProtectedRoute>
+                    <Epargne />
                   </ProtectedRoute>
                 }
               />

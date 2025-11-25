@@ -16,6 +16,7 @@ import {
 import { db } from "../lib/firebase";
 import { collection, getDocs } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { cacheManager, withCache, CacheManager } from "../lib/cache";
 import {
   LineChart,
   Line,
@@ -77,41 +78,49 @@ export default function Dashboard() {
     personal: { transactions: [], vehicleExpenses: [], homeOfficeExpenses: [], techExpenses: [] },
   });
 
-  // Fonction pour charger les données du budget
+  // Fonction pour charger les données du budget (avec cache)
   const loadBudgetData = async (userId: string, mode: "business" | "personal") => {
     if (!db || !userId) return null;
     
-    try {
-      const modeName = mode === "business" ? "entreprise" : "personnelle";
-      const budgetRef = collection(db, "Users", userId, "data", modeName, "budget");
-      const snapshot = await getDocs(budgetRef);
-      
-      const budget: any = {
-        salaryType: "annual" as "annual" | "biweekly",
-        salary: 0,
-        salaryStartDate: "",
-        fixedExpenses: [] as Array<{ id: string; name: string; amount: number; startDate: string; endDate?: string; recurrence: string; category?: string }>,
-        variableExpenses: [] as Array<{ id: string; name: string; amount: number; date: string; category?: string }>,
-      };
-      
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (docSnap.id === "settings") {
-          budget.salaryType = data.salaryType || "annual";
-          budget.salary = data.salary || 0;
-          budget.salaryStartDate = data.salaryStartDate || "";
-        } else if (data.type === "fixed") {
-          budget.fixedExpenses.push({ ...data, id: docSnap.id });
-        } else if (data.type === "variable") {
-          budget.variableExpenses.push({ ...data, id: docSnap.id });
+    const cacheKey = CacheManager.generateKey("budget", userId, mode);
+    
+    return withCache(
+      cacheKey,
+      async () => {
+        try {
+          const modeName = mode === "business" ? "entreprise" : "personnelle";
+          const budgetRef = collection(db, "Users", userId, "data", modeName, "budget");
+          const snapshot = await getDocs(budgetRef);
+          
+          const budget: any = {
+            salaryType: "annual" as "annual" | "biweekly",
+            salary: 0,
+            salaryStartDate: "",
+            fixedExpenses: [] as Array<{ id: string; name: string; amount: number; startDate: string; endDate?: string; recurrence: string; category?: string }>,
+            variableExpenses: [] as Array<{ id: string; name: string; amount: number; date: string; category?: string }>,
+          };
+          
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (docSnap.id === "settings") {
+              budget.salaryType = data.salaryType || "annual";
+              budget.salary = data.salary || 0;
+              budget.salaryStartDate = data.salaryStartDate || "";
+            } else if (data.type === "fixed") {
+              budget.fixedExpenses.push({ ...data, id: docSnap.id });
+            } else if (data.type === "variable") {
+              budget.variableExpenses.push({ ...data, id: docSnap.id });
+            }
+          });
+          
+          return budget;
+        } catch (error) {
+          console.error("Erreur lors du chargement du budget:", error);
+          return null;
         }
-      });
-      
-      return budget;
-    } catch (error) {
-      console.error("Erreur lors du chargement du budget:", error);
-      return null;
-    }
+      },
+      3 * 60 * 1000 // Cache de 3 minutes pour le budget
+    );
   };
   
   // Les données mock sont uniquement pour la démo quand l'utilisateur n'est pas connecté
@@ -138,16 +147,48 @@ export default function Dashboard() {
         if (usageType === "both") {
           const [businessData, personalData] = await Promise.all([
             Promise.all([
-              getTransactions(selectedYear, "business"),
-              getVehicleAnnualProfiles(selectedYear, "business"),
-              getHomeOfficeExpenses(selectedYear, "business"),
-              getTechExpenses(selectedYear, "business"),
+              withCache(
+                CacheManager.generateKey("transactions", selectedYear, "business"),
+                () => getTransactions(selectedYear, "business"),
+                5 * 60 * 1000 // 5 minutes
+              ),
+              withCache(
+                CacheManager.generateKey("vehicleExpenses", selectedYear, "business"),
+                () => getVehicleAnnualProfiles(selectedYear, "business"),
+                5 * 60 * 1000
+              ),
+              withCache(
+                CacheManager.generateKey("homeOfficeExpenses", selectedYear, "business"),
+                () => getHomeOfficeExpenses(selectedYear, "business"),
+                5 * 60 * 1000
+              ),
+              withCache(
+                CacheManager.generateKey("techExpenses", selectedYear, "business"),
+                () => getTechExpenses(selectedYear, "business"),
+                5 * 60 * 1000
+              ),
             ]),
             Promise.all([
-              getTransactions(selectedYear, "personal"),
-              getVehicleAnnualProfiles(selectedYear, "personal"),
-              getHomeOfficeExpenses(selectedYear, "personal"),
-              getTechExpenses(selectedYear, "personal"),
+              withCache(
+                CacheManager.generateKey("transactions", selectedYear, "personal"),
+                () => getTransactions(selectedYear, "personal"),
+                5 * 60 * 1000
+              ),
+              withCache(
+                CacheManager.generateKey("vehicleExpenses", selectedYear, "personal"),
+                () => getVehicleAnnualProfiles(selectedYear, "personal"),
+                5 * 60 * 1000
+              ),
+              withCache(
+                CacheManager.generateKey("homeOfficeExpenses", selectedYear, "personal"),
+                () => getHomeOfficeExpenses(selectedYear, "personal"),
+                5 * 60 * 1000
+              ),
+              withCache(
+                CacheManager.generateKey("techExpenses", selectedYear, "personal"),
+                () => getTechExpenses(selectedYear, "personal"),
+                5 * 60 * 1000
+              ),
             ]),
           ]);
           
@@ -182,10 +223,26 @@ export default function Dashboard() {
           // Si un seul mode, charger normalement
           const mode = usageType || "business";
         const [transactionsData, vehicleData, homeOfficeData, techData] = await Promise.all([
-            getTransactions(selectedYear, mode),
-            getVehicleAnnualProfiles(selectedYear, mode),
-            getHomeOfficeExpenses(selectedYear, mode),
-            getTechExpenses(selectedYear, mode),
+            withCache(
+              CacheManager.generateKey("transactions", selectedYear, mode),
+              () => getTransactions(selectedYear, mode),
+              5 * 60 * 1000
+            ),
+            withCache(
+              CacheManager.generateKey("vehicleExpenses", selectedYear, mode),
+              () => getVehicleAnnualProfiles(selectedYear, mode),
+              5 * 60 * 1000
+            ),
+            withCache(
+              CacheManager.generateKey("homeOfficeExpenses", selectedYear, mode),
+              () => getHomeOfficeExpenses(selectedYear, mode),
+              5 * 60 * 1000
+            ),
+            withCache(
+              CacheManager.generateKey("techExpenses", selectedYear, mode),
+              () => getTechExpenses(selectedYear, mode),
+              5 * 60 * 1000
+            ),
         ]);
         setTransactions(transactionsData);
         setVehicleExpenses(vehicleData);
@@ -210,15 +267,35 @@ export default function Dashboard() {
     
     // Écouter les événements personnalisés pour les changements
     const handleTransactionsUpdate = () => {
+      // Invalider le cache des transactions
+      if (currentUser) {
+        cacheManager.delete(CacheManager.generateKey("transactions", selectedYear, "business"));
+        cacheManager.delete(CacheManager.generateKey("transactions", selectedYear, "personal"));
+      }
       loadAllData();
     };
     const handleVehicleExpensesUpdate = () => {
+      // Invalider le cache des dépenses véhicule
+      if (currentUser) {
+        cacheManager.delete(CacheManager.generateKey("vehicleExpenses", selectedYear, "business"));
+        cacheManager.delete(CacheManager.generateKey("vehicleExpenses", selectedYear, "personal"));
+      }
       loadAllData();
     };
     const handleHomeOfficeExpensesUpdate = () => {
+      // Invalider le cache des dépenses bureau à domicile
+      if (currentUser) {
+        cacheManager.delete(CacheManager.generateKey("homeOfficeExpenses", selectedYear, "business"));
+        cacheManager.delete(CacheManager.generateKey("homeOfficeExpenses", selectedYear, "personal"));
+      }
       loadAllData();
     };
     const handleTechExpensesUpdate = () => {
+      // Invalider le cache des dépenses tech
+      if (currentUser) {
+        cacheManager.delete(CacheManager.generateKey("techExpenses", selectedYear, "business"));
+        cacheManager.delete(CacheManager.generateKey("techExpenses", selectedYear, "personal"));
+      }
       loadAllData();
     };
     
@@ -231,6 +308,8 @@ export default function Dashboard() {
     const handleBudgetUpdate = async () => {
       if (currentUser) {
         const mode = usageType === "both" ? currentMode : (usageType || "business");
+        // Invalider le cache du budget
+        cacheManager.delete(CacheManager.generateKey("budget", currentUser.uid, mode));
         const budget = await loadBudgetData(currentUser.uid, mode);
         setBudgetData(budget);
       }
@@ -318,27 +397,158 @@ export default function Dashboard() {
 
   const budgetedExpenses = calculateBudgetedExpenses();
 
+  // Fonction helper pour déterminer la période de filtrage selon selectedPeriod
+  const getPeriodDates = () => {
+    const now = new Date();
+    const year = selectedYear || now.getFullYear();
+    
+    switch (selectedPeriod) {
+      case "month":
+        // Si l'année sélectionnée est différente de l'année actuelle, utiliser le mois de janvier de l'année sélectionnée
+        if (year !== now.getFullYear()) {
+          return {
+            start: new Date(year, 0, 1),
+            end: new Date(year, 0, 31)
+          };
+        }
+        return {
+          start: startOfMonth(now),
+          end: endOfMonth(now)
+        };
+      case "quarter":
+        const quarter = Math.floor(now.getMonth() / 3);
+        // Si l'année sélectionnée est différente de l'année actuelle, utiliser le premier trimestre
+        if (year !== now.getFullYear()) {
+          return {
+            start: new Date(year, 0, 1),
+            end: new Date(year, 2, 31)
+          };
+        }
+        return {
+          start: new Date(year, quarter * 3, 1),
+          end: new Date(year, (quarter + 1) * 3, 0)
+        };
+      case "ytd":
+        // Si l'année sélectionnée est différente de l'année actuelle, utiliser toute l'année
+        if (year !== now.getFullYear()) {
+          return {
+            start: new Date(year, 0, 1),
+            end: new Date(year, 11, 31)
+          };
+        }
+        return {
+          start: startOfYear(now),
+          end: now
+        };
+      case "all":
+      default:
+        return {
+          start: new Date(year, 0, 1),
+          end: new Date(year, 11, 31, 23, 59, 59, 999)
+        };
+    }
+  };
+
   // Calculer les statistiques réelles à partir des transactions et des dépenses spéciales
   // En mode personnel, gérer les nouveaux types et exclure les transferts entre comptes
   const isPersonalMode = usageType === "personal" || (usageType === "both" && currentMode === "personal");
   
+  const periodDates = getPeriodDates();
+  
+  // Fonction helper pour vérifier si une date est dans la période
+  const isInPeriod = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      // Normaliser les dates à minuit pour la comparaison
+      date.setHours(0, 0, 0, 0);
+      const start = new Date(periodDates.start);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(periodDates.end);
+      end.setHours(23, 59, 59, 999);
+      
+      return date >= start && date <= end;
+    } catch (error) {
+      console.warn("Date invalide dans isInPeriod:", dateString);
+      return false;
+    }
+  };
+  
+  // Calculer le salaire pour la période sélectionnée
+  const calculateSalaryForPeriod = () => {
+    if (!budgetData || !budgetData.salary || !budgetData.salaryStartDate) return 0;
+    
+    const startDate = new Date(budgetData.salaryStartDate);
+    const periodStart = periodDates.start;
+    const periodEnd = periodDates.end;
+    
+    // Si le salaire commence après la fin de la période, retourner 0
+    if (startDate > periodEnd) return 0;
+    
+    // Si le salaire commence avant le début de la période, utiliser le début de la période
+    const effectiveStart = startDate > periodStart ? startDate : periodStart;
+    
+    if (budgetData.salaryType === "annual") {
+      // Salaire annuel : calculer la proportion de l'année dans la période
+      const yearStart = new Date(periodStart.getFullYear(), 0, 1);
+      const yearEnd = new Date(periodStart.getFullYear(), 11, 31);
+      const yearDays = Math.ceil((yearEnd.getTime() - yearStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      const periodStartDate = effectiveStart > periodStart ? effectiveStart : periodStart;
+      const periodEndDate = periodEnd;
+      const periodDays = Math.ceil((periodEndDate.getTime() - periodStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      const annualSalary = budgetData.salary;
+      return (annualSalary / yearDays) * periodDays;
+    } else {
+      // Salaire bihebdomadaire : compter les périodes de paie dans la période
+      const biweeklySalary = budgetData.salary;
+      let currentDate = new Date(effectiveStart);
+      let totalSalary = 0;
+      
+      // Calculer le nombre de périodes de 2 semaines dans la période
+      while (currentDate <= periodEnd) {
+        totalSalary += biweeklySalary;
+        currentDate = addWeeks(currentDate, 2);
+      }
+      
+      return totalSalary;
+    }
+  };
+  
+  const salaryForPeriod = calculateSalaryForPeriod();
+  
+  // Déterminer le mode actuel pour le filtrage
+  const currentModeForFilter = usageType === "both" ? currentMode : (usageType || "business");
+  
   const totalIncome = transactions
     .filter((t) => {
-        if (isPersonalMode) {
-          // En mode personnel : revenu = "revenu" ou "income"
-          // Exclure les transferts entre comptes (transferType === "between_accounts")
-          if (t.type === "revenu" || t.type === "income") return true;
-          if (t.type === "transfert" && t.transferType === "between_accounts") return false;
-          return false;
-        } else {
-          return t.type === "income" || t.type === "revenu";
-        }
+      // Filtrer par mode : s'assurer que la transaction correspond au mode actuel
+      if (t.mode && t.mode !== currentModeForFilter) return false;
+      
+      // Filtrer par période
+      if (!isInPeriod(t.date)) return false;
+      
+      if (isPersonalMode) {
+        // En mode personnel : revenu = "revenu" ou "income"
+        // Exclure les transferts entre comptes (transferType === "between_accounts")
+        if (t.type === "revenu" || t.type === "income") return true;
+        if (t.type === "transfert" && t.transferType === "between_accounts") return false;
+        return false;
+      } else {
+        return t.type === "income" || t.type === "revenu";
+      }
     })
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + t.amount, 0) + salaryForPeriod;
 
   // Dépenses des transactions
   const transactionExpenses = transactions
     .filter((t) => {
+      // Filtrer par mode : s'assurer que la transaction correspond au mode actuel
+      if (t.mode && t.mode !== currentModeForFilter) return false;
+      
+      // Filtrer par période
+      if (!isInPeriod(t.date)) return false;
+      
       if (isPersonalMode) {
         // En mode personnel : dépenses = "depense", "remboursement", "paiement_facture", "transfert" (entre personnes)
         // Exclure les transferts entre comptes (transferType === "between_accounts")
@@ -346,25 +556,115 @@ export default function Dashboard() {
         return t.type === "depense" || t.type === "remboursement" || t.type === "paiement_facture" || 
                (t.type === "transfert" && t.transferType === "between_persons");
       } else {
-        return t.type === "expense";
+        // En mode business : dépenses = "expense" ou montants négatifs de type "income" (erreurs de saisie)
+        return t.type === "expense" || (t.type === "income" && t.amount < 0);
       }
     })
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
-  // Dépenses véhicule (deductibleTotal est déjà calculé et enregistré dans la DB)
+  // Dépenses véhicule - filtrer par période (année du profil)
   const vehicleExpensesTotal = vehicleExpenses
+    .filter((ve) => {
+      if (!ve.year) return false;
+      const veYear = parseInt(ve.year.toString());
+      const periodYear = periodDates.start.getFullYear();
+      
+      if (selectedPeriod === "all") {
+        return veYear === selectedYear;
+      } else {
+        // Pour les autres périodes, inclure seulement si l'année correspond
+        return veYear === periodYear;
+      }
+    })
     .reduce((sum, ve) => sum + (ve.deductibleTotal || 0), 0);
 
-  // Dépenses bureau à domicile (totalExpenses est déjà calculé et enregistré dans la DB)
+  // Dépenses bureau à domicile - filtrer par période (année du profil)
   const homeOfficeExpensesTotal = homeOfficeExpenses
+    .filter((ho) => {
+      if (!ho.year) return false;
+      const hoYear = parseInt(ho.year.toString());
+      const periodYear = periodDates.start.getFullYear();
+      
+      if (selectedPeriod === "all") {
+        return hoYear === selectedYear;
+      } else {
+        return hoYear === periodYear;
+      }
+    })
     .reduce((sum, ho) => sum + (ho.totalExpenses || 0), 0);
 
-  // Dépenses techno (totalExpenses est déjà calculé et enregistré dans la DB)
+  // Dépenses techno - filtrer par période (année du profil)
   const techExpensesTotal = techExpenses
+    .filter((te) => {
+      if (!te.year) return false;
+      const teYear = parseInt(te.year.toString());
+      const periodYear = periodDates.start.getFullYear();
+      
+      if (selectedPeriod === "all") {
+        return teYear === selectedYear;
+      } else {
+        return teYear === periodYear;
+      }
+    })
     .reduce((sum, te) => sum + (te.totalExpenses || 0), 0);
 
-  // Total de toutes les dépenses
-  const totalExpenses = transactionExpenses + vehicleExpensesTotal + homeOfficeExpensesTotal + techExpensesTotal;
+  // Calculer les dépenses réelles du budget pour la période sélectionnée
+  // Note: Les dépenses du budget sont réelles, pas prévisionnelles
+  const calculateBudgetExpensesForPeriod = () => {
+    if (!budgetData) return 0;
+    
+    let budgetExpensesTotal = 0;
+    
+    // Dépenses fixes réelles pour la période
+    if (budgetData.fixedExpenses) {
+      budgetData.fixedExpenses.forEach((exp) => {
+        const startDate = new Date(exp.startDate);
+        const endDate = exp.endDate ? new Date(exp.endDate) : new Date(selectedYear, 11, 31);
+        
+        // Vérifier si la dépense chevauche la période
+        if (endDate >= periodDates.start && startDate <= periodDates.end) {
+          const effectiveStart = startDate > periodDates.start ? startDate : periodDates.start;
+          const effectiveEnd = endDate < periodDates.end ? endDate : periodDates.end;
+          
+          // Calculer le nombre d'occurrences dans la période selon la récurrence
+          const recurrenceMap: { [key: string]: number } = {
+            weekly: 52,
+            biweekly: 26,
+            monthly: 12,
+            bimonthly: 6,
+            quarterly: 4,
+            yearly: 1,
+            none: 1,
+          };
+          
+          const annualOccurrences = recurrenceMap[exp.recurrence] || 12;
+          const yearDays = 365;
+          const periodDays = Math.ceil((effectiveEnd.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          
+          // Calculer proportionnellement pour la période
+          const periodOccurrences = (annualOccurrences / yearDays) * periodDays;
+          budgetExpensesTotal += exp.amount * Math.max(1, Math.round(periodOccurrences));
+        }
+      });
+    }
+    
+    // Dépenses variables réelles pour la période
+    if (budgetData.variableExpenses) {
+      budgetData.variableExpenses.forEach((v) => {
+        const expDate = new Date(v.date);
+        if (expDate >= periodDates.start && expDate <= periodDates.end) {
+          budgetExpensesTotal += Math.abs(v.amount);
+        }
+      });
+    }
+    
+    return budgetExpensesTotal;
+  };
+  
+  const budgetExpensesForPeriod = calculateBudgetExpensesForPeriod();
+
+  // Total de toutes les dépenses réelles (transactions + dépenses spéciales + dépenses du budget)
+  const totalExpenses = transactionExpenses + vehicleExpensesTotal + homeOfficeExpensesTotal + techExpensesTotal + budgetExpensesForPeriod;
 
   const netIncome = totalIncome - totalExpenses;
   const margin = totalIncome > 0 ? ((netIncome / totalIncome) * 100).toFixed(1) : "0";
@@ -603,6 +903,9 @@ export default function Dashboard() {
 
     // 4. Ajouter les transactions réelles (elles remplacent les valeurs planifiées pour les jours concernés)
     transactions.forEach((transaction) => {
+      // Filtrer par mode : s'assurer que la transaction correspond au mode actuel
+      if (transaction.mode && transaction.mode !== currentModeForFilter) return;
+      
       try {
         const transactionDateParts = transaction.date.split('-');
         const transactionDate = new Date(
@@ -745,6 +1048,9 @@ export default function Dashboard() {
 
     // Filtrer les transactions de dépenses selon le mode et l'année
     const expenseTransactions = transactions.filter((t) => {
+      // Filtrer par mode : s'assurer que la transaction correspond au mode actuel
+      if (t.mode && t.mode !== currentModeForFilter) return false;
+      
       // Filtrer par année
       try {
         const transactionDate = new Date(t.date);
@@ -868,22 +1174,6 @@ export default function Dashboard() {
   
   // Déterminer si on est en mode personnel (déjà défini plus haut)
   
-  // Formater le salaire pour l'affichage
-  const formatSalary = () => {
-    if (!budgetData || !budgetData.salary) return null;
-    const salaryValue = budgetData.salaryType === "annual"
-      ? budgetData.salary
-      : budgetData.salary * 26; // 26 périodes aux 2 semaines
-    return {
-      annual: salaryValue,
-      display: budgetData.salaryType === "annual"
-        ? `${budgetData.salary.toLocaleString("en-US", { minimumFractionDigits: 2 })} $/an`
-        : `${budgetData.salary.toLocaleString("en-US", { minimumFractionDigits: 2 })} $/2 sem. (${salaryValue.toLocaleString("en-US", { minimumFractionDigits: 2 })} $/an)`,
-    };
-  };
-  
-  const salaryInfo = formatSalary();
-  
   const stats = [
     {
       label: `${t("dashboard.revenue")} ${selectedYear}`,
@@ -893,14 +1183,6 @@ export default function Dashboard() {
       icon: TrendingUp,
       budget: budgetedIncome > 0 ? `${t("dashboard.budget")}: ${budgetedIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })} $` : undefined,
     },
-    // Afficher le salaire uniquement en mode personnel et si un salaire est défini
-    ...(isPersonalMode && salaryInfo ? [{
-      label: t("dashboard.salary"),
-      value: salaryInfo.annual.toLocaleString("en-US", { minimumFractionDigits: 2 }) + " $",
-      change: salaryInfo.display,
-      positive: true,
-      icon: DollarSign,
-    }] : []),
     {
       label: `${t("dashboard.expenses")} ${selectedYear}`,
       value: shouldShowMockData ? "18,420 $" : `${totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })} $`,

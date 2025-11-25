@@ -25,11 +25,13 @@
   },
   "dependencies": {
     "buffer": "^6.0.3",
-    "dotenv": "^17.2.1",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "firebase": "^11.1.0",
+    "helmet": "^8.1.0",
     "moment": "^2.30.1",
     "nanoid": "^5.1.6",
+    "openai": "^6.9.1",
     "otplib": "^12.0.1",
     "qrcode": "^1.5.4",
     "react-big-calendar": "^1.19.4",
@@ -110,5 +112,19 @@
     "vaul": "^1.1.2",
     "vite": "^7.1.2",
     "vitest": "^3.2.4"
-  }
+  },
+  "version": "1.0.0",
+  "description": "",
+  "main": "postcss.config.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Causertragique/financeautonome2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Causertragique/financeautonome2/issues"
+  },
+  "homepage": "https://github.com/Causertragique/financeautonome2#readme"
 }

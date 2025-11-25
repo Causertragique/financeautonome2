@@ -162,7 +162,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
     },
     {
       name: t("sidebar.personalSavings"),
-      href: "/savings",
+      href: "/epargne",
       icon: PiggyBank,
     },
     {
@@ -289,8 +289,8 @@ export default function MainLayout({ children }: MainLayoutProps) {
             </div>
           )}
           
-          {/* Sélecteur d'année fiscale (uniquement pour entreprise) */}
-          {sidebarOpen && (usageType === "business" || (usageType === "both" && currentMode === "business")) && (
+          {/* Sélecteur d'année (entreprise et personnel) */}
+          {sidebarOpen && (
             <div className="mb-3 px-2">
               <select
                 value={selectedYear}

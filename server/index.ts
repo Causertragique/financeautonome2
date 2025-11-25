@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { handleDemo } from "./routes/demo";
 import { getPaymentMethods, createPaymentMethod, deletePaymentMethod } from "./routes/payment-methods";
+import { handleOpenAI } from "./routes/openai";
 
 export function createServer() {
   const app = express();
@@ -24,6 +25,9 @@ export function createServer() {
   app.get("/api/payment-methods", getPaymentMethods);
   app.post("/api/payment-methods", createPaymentMethod);
   app.delete("/api/payment-methods/:id", deletePaymentMethod);
+
+  // Route sécurisée pour OpenAI (la clé API reste côté serveur)
+  app.post("/api/openai", handleOpenAI);
 
   return app;
 }
