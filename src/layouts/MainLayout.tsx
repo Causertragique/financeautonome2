@@ -65,8 +65,8 @@ export default function MainLayout({ children }: MainLayoutProps) {
   useEffect(() => {
     if (usageType === "both" && prevModeRef.current !== null && prevModeRef.current !== currentMode) {
       // Si on n'est pas déjà sur le dashboard, rediriger
-      if (location.pathname !== "/") {
-        navigate("/");
+      if (location.pathname !== "/dashboard") {
+        navigate("/dashboard");
       }
     }
     prevModeRef.current = currentMode;

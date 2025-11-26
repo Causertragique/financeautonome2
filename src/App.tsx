@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import { AuthProvider } from "./contexts/AuthContext";
+import { SubscriptionProvider } from "./contexts/SubscriptionContext";
 import { FiscalYearProvider } from "./contexts/FiscalYearContext";
 import { UsageModeProvider } from "./contexts/UsageModeContext";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -31,6 +32,7 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
+import GuestPage from "./pages/GuestPage";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +40,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <LanguageProvider>
       <AuthProvider>
+        <SubscriptionProvider>
         <UsageModeProvider>
         <FiscalYearProvider>
           <TooltipProvider>
@@ -51,8 +54,9 @@ const App = () => (
           >
             <Routes>
               <Route path="/login" element={<Login />} />
+              <Route path="/" element={<GuestPage />} />
               <Route
-                path="/"
+                path="/dashboard"
                 element={
                   <ProtectedRoute>
                     <Dashboard />
@@ -165,6 +169,7 @@ const App = () => (
               />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
+              <Route path="/guest" element={<GuestPage />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
@@ -172,6 +177,7 @@ const App = () => (
         </TooltipProvider>
         </FiscalYearProvider>
         </UsageModeProvider>
+        </SubscriptionProvider>
       </AuthProvider>
     </LanguageProvider>
   </QueryClientProvider>

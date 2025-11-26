@@ -47,7 +47,7 @@ export default function Login() {
           description: "Vous êtes maintenant connecté.",
         });
       }
-      navigate("/");
+      navigate("/dashboard");
     } catch (error: any) {
       toast({
         title: "Erreur",
@@ -68,7 +68,7 @@ export default function Login() {
         title: "Connexion réussie",
         description: "Vous êtes maintenant connecté avec Google.",
       });
-      navigate("/");
+      navigate("/dashboard");
     } catch (error: any) {
       toast({
         title: "Erreur",
